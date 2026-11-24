@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Project builds** at <https://mirror.prepaid-host.io/hvpatch/>
+  (canary ring first), signed with the project keys in `project-keys/`
+  (manifest key id `64C12AABF4A1E0D4`). The mirror publishes the number of
+  active nodes per day as aggregates only (`/hvpatch/stats.json`).
 - **Unattended pipeline** (`builder/pipeline.sh`, `builder/plan.sh`,
   `docs/pipeline.md`): the build stages as containers of one Kubernetes
   pod; builds new Proxmox kernel releases and catalog changes on its own and
