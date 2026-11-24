@@ -56,26 +56,20 @@ SSH_DIR=${SSH_DIR:-/ssh}
 if [ "$STAGE" = prepare ]; then
   mkdir -p "$RUN" "$STATE"
   rm -f "$RUN/failed" "$RUN/none" "$TRUST/plan"
+  G=(git -c core.hooksPath=/dev/null -c core.fsmonitor=false)
   if [ -d "$SRC/.git" ]; then
-    git -C "$SRC" fetch -q origin "${GIT_REF:-main}"
-    git -C "$SRC" -c advice.detachedHead=false checkout -q --force FETCH_HEAD
-    git -C "$SRC" clean -fdxq
+    "${G[@]}" -C "$SRC" fetch -q origin "${GIT_REF:-main}"
+    "${G[@]}" -C "$SRC" -c advice.detachedHead=false checkout -q --force FETCH_HEAD
+    "${G[@]}" -C "$SRC" clean -fdxq
   else
-    git clone -q --branch "${GIT_REF:-main}" "${GIT_URL:-https://github.com/prepaid-host/hvpatch.git}" "$SRC"
+    "${G[@]}" clone -q --branch "${GIT_REF:-main}" "${GIT_URL:-https://github.com/prepaid-host/hvpatch.git}" "$SRC"
   fi
   log "repository at $(git -C "$SRC" rev-parse --short HEAD)"
   mkdir -p "$PUB"
   rsync_remote "${REPO_REMOTE:?REPO_REMOTE not set}" "$PUB/"
   CATALOG="$SRC/catalog" STATE="$STATE" "$HERE/plan.sh" "$PUB" > "$TRUST/plan"
   git -C "$SRC" rev-parse HEAD > "$TRUST/commit"
-  if [ -s "$TRUST/plan" ]; then log "plan: $(cat "$TRUST/plan")"; else log "nothing to build"; exit 0; fi
-  # Build cache: keep the newest KEEP_TREES kernel trees (by use), always the planned one.
-  read -r PK _ < "$TRUST/plan"
-  mkdir -p "$WORK/build/$PK"; touch "$WORK/build/$PK"
-  ls -1dt "$WORK"/build/*/ 2>/dev/null | tail -n +"$(( ${KEEP_TREES:-3} + 1 ))" | while read -r d; do
-    [ "${d%/}" = "$WORK/build/$PK" ] && continue
-    log "removing cached kernel tree ${d%/}/src"; rm -rf "${d%/}/src"
-  done
+  if [ -s "$TRUST/plan" ]; then log "plan: $(cat "$TRUST/plan")"; else log "nothing to build"; fi
   exit 0
 fi
 
@@ -105,6 +99,14 @@ run_stage() {
 
 case "$STAGE" in
   fetch)
+    # Build cache (this stage has no keys; /work/build is written by earlier
+    # builds): keep the newest KEEP_TREES kernel trees, always the planned one.
+    mkdir -p "$W"; touch "$W"
+    find "$WORK/build" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2- \
+      | tail -n +"$(( ${KEEP_TREES:-3} + 1 ))" | while read -r d; do
+      [ "$d" = "$W" ] && continue
+      [ -d "$d/src" ] && ! [ -L "$d/src" ] && { log "removing cached kernel tree $d/src"; rm -rf --one-file-system "$d/src"; }
+    done
     # Always fresh: a cached copy could have been changed by an earlier build.
     rm -rf "$W/shipped"; mkdir -p "$W/shipped"
     if ! "$HERE/fetch-shipped.sh" "$KVER" "$W/shipped"; then echo fetch > "$RUN/failed"; exit 0; fi

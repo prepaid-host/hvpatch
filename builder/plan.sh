@@ -28,10 +28,14 @@ mkdir -p "$STATE"
 apt-get update -qq >/dev/null 2>&1 || die "apt-get update failed (Proxmox repository)"
 COMMIT=$(git -C "$CATALOG" rev-parse HEAD)
 
+# Collect first: leaving a `cmd | while` loop early would SIGPIPE the
+# producer, and pipefail turns that into a failure.
+KERNELS=()
 for s in $SERIES; do
-  apt-cache search --names-only "^proxmox-kernel-${s//./\\.}\.[0-9]+-[0-9]+-pve-signed$" \
-    | sed -E 's/^proxmox-kernel-([^ ]+)-signed .*/\1/' | sort -V | tail -n "$NEWEST" | sort -rV
-done | while read -r kver; do
+  mapfile -t -O "${#KERNELS[@]}" KERNELS < <(apt-cache search --names-only "^proxmox-kernel-${s//./\\.}\.[0-9]+-[0-9]+-pve-signed$" \
+    | sed -E 's/^proxmox-kernel-([^ ]+)-signed .*/\1/' | sort -V | tail -n "$NEWEST" | sort -rV)
+done
+for kver in ${KERNELS[@]+"${KERNELS[@]}"}; do
   [ -e "$STATE/$kver@$COMMIT.failed" ] && { log "$kver: failed at $COMMIT before, skipped"; continue; }
   [ -e "$STATE/$kver@$COMMIT.none" ] && continue
   m="$REPO/v1/$kver/canary/manifest.json"
