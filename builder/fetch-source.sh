@@ -16,6 +16,13 @@
 # usage: fetch-source.sh <kver> <outdir>
 #
 # A moved tag, a tampered mirror or an unlisted release stops the build.
+#
+# Environment:
+#   KERNELS_LOCK  lock file (default: kernels.lock next to this script)
+#   AUTO_LOCK=1   for unattended pipelines: a release missing from the lock
+#                 is built from the commit that released it (7.3: the tag
+#                 proxmox/<pkgver>; 7.0: the changelog bump in pve-kernel),
+#                 logged as AUTO_LOCK. The release checks still apply.
 source "$(dirname "$0")/lib.sh"
 KVER=${1:?kver}; OUT=${2:?outdir}
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -41,8 +48,7 @@ if [ "$SERIES" = 7.0 ]; then
   REPO=${PVE_KERNEL_GIT:-https://git.proxmox.com/git/pve-kernel.git}
   UBUNTU=${PVE_UBUNTU_KERNEL_GIT:-https://git.proxmox.com/git/mirror_ubuntu-kernels.git}
   PVE=${PVE_KERNEL_DIR:-$(dirname "$OUT")/cache/pve-kernel}
-  TAG="pve-kernel@$WANT"
-  if [ "$(cat "$OUT/.hvpatch-tag" 2>/dev/null)" = "$TAG" ] && [ -n "$WANT" ]; then
+  if [ -n "$WANT" ] && [ "$(cat "$OUT/.hvpatch-tag" 2>/dev/null)" = "pve-kernel@$WANT" ]; then
     check_tree
     log "source for $KVER already prepared at $OUT"
     exit 0
@@ -52,8 +58,21 @@ if [ "$SERIES" = 7.0 ]; then
   if [ -z "$WANT" ]; then
     CAND=$(git -C "$PVE" rev-parse -q --verify "refs/tags/proxmox-kernel-$KVER^{commit}" 2>/dev/null \
       || git -C "$PVE" log --all -1 --format=%H -G"[(]${PKGVER}[)]" -- debian/changelog || true)
-    die "$KVER is not in $LOCK. Find the pve-kernel commit that released $PKGVER (candidate: ${CAND:-none found}),
+    if [ "${AUTO_LOCK:-0}" = 1 ] && [ -n "$CAND" ]; then
+      # Unattended pipelines: take the commit that released this version. The
+      # Makefile check below still has to name exactly $KVER.
+      WANT=$CAND
+      log "AUTO_LOCK: $KVER -> pve-kernel $WANT (not in $LOCK)"
+    else
+      die "$KVER is not in $LOCK. Find the pve-kernel commit that released $PKGVER (candidate: ${CAND:-none found}),
         review it, and add this line: $KVER <commit>"
+    fi
+  fi
+  TAG="pve-kernel@$WANT"
+  if [ "$(cat "$OUT/.hvpatch-tag" 2>/dev/null)" = "$TAG" ]; then
+    check_tree
+    log "source for $KVER already prepared at $OUT"
+    exit 0
   fi
   git -C "$PVE" cat-file -e "$WANT^{commit}" 2>/dev/null || die "locked commit $WANT is not in $REPO"
   git -C "$PVE" -c advice.detachedHead=false checkout -q --force "$WANT"
@@ -101,6 +120,11 @@ fi
 
 REPO=${PROXMOX_KERNEL_GIT:-https://git.proxmox.com/git/proxmox-kernel.git}
 TAG="proxmox/$PKGVER"
+# AUTO_LOCK and a tree prepared from this tag before: keep the commit it was
+# prepared from (a tag that moved upstream later is not followed).
+if [ -z "$WANT" ] && [ "${AUTO_LOCK:-0}" = 1 ] && [ "$(cat "$OUT/.hvpatch-tag" 2>/dev/null)" = "$TAG" ]; then
+  WANT=$(git -C "$OUT" rev-parse -q --verify "refs/tags/$TAG^{commit}" 2>/dev/null || true)
+fi
 
 # Same release already prepared: keep the tree and klp-tmp, so klp-build can
 # reuse the original build (--short-circuit).
@@ -118,7 +142,12 @@ fi
 git -C "$OUT" fetch --tags origin
 GOT=$(git -C "$OUT" rev-parse "$TAG^{commit}")
 if [ -z "$WANT" ]; then
-  die "$KVER is not in $LOCK. Review tag $TAG (commit $GOT) and add this line: $KVER $GOT"
+  if [ "${AUTO_LOCK:-0}" = 1 ]; then
+    WANT=$GOT
+    log "AUTO_LOCK: $KVER -> tag $TAG, commit $WANT (not in $LOCK)"
+  else
+    die "$KVER is not in $LOCK. Review tag $TAG (commit $GOT) and add this line: $KVER $GOT"
+  fi
 fi
 [ "$GOT" = "$WANT" ] || die "tag $TAG is commit $GOT, but kernels.lock says $WANT; refusing to build"
 git -C "$OUT" -c advice.detachedHead=false checkout --force "$GOT"

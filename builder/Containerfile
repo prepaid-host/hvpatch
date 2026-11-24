@@ -36,7 +36,7 @@ RUN apt-get update \
       build-essential gcc-14 binutils bc bison flex cpio kmod rsync gawk \
       libelf-dev libssl-dev libxxhash-dev libdw-dev dwarves zstd xz-utils lz4 bzip2 \
       git git-buildpackage quilt devscripts ca-certificates curl gnupg python3 \
-      qemu-system-x86 busybox-static e2fsprogs openssl \
+      qemu-system-x86 busybox-static e2fsprogs openssl openssh-client \
  && apt-get install -y --no-install-recommends -t trixie-backports \
       rustc rust-src rustfmt bindgen \
  && rm -rf /var/lib/apt/lists/*
