@@ -19,6 +19,9 @@ permissions:
 
 jobs:
   image:
+    # Manual runs too only from main: the image and its :main tag must come
+    # from reviewed code.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     permissions:
       contents: read
