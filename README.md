@@ -265,6 +265,7 @@ Solutions GmbH.
 
 - [Architecture](docs/architecture.md): pipeline, manifest, agent rules
 - [Self-hosting](docs/self-hosting.md): your own pipeline and keys, fleet rollout
+- [Unattended pipeline](docs/pipeline.md): builds on Kubernetes, follows Proxmox's kernel releases
 - [Toolchains](docs/toolchains.md): compiler and snapshot values per kernel release
 - [APT repository](docs/apt-repository.md): publishing the agent package
 - [Catalog format](catalog/README.md): how CVE entries are written and reviewed

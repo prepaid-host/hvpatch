@@ -254,7 +254,7 @@ ACCEL=tcg; CPU=max
 if [ -w /dev/kvm ]; then ACCEL=kvm; CPU=host; fi
 log "booting $KVER in QEMU ($ACCEL)"
 LOG="$OUT/qemu.log"
-timeout 1800 qemu-system-x86_64 -machine q35,accel="$ACCEL" -cpu "$CPU" -m 2048 -smp 4 \
+timeout 1800 qemu-system-x86_64 -machine q35,accel="$ACCEL" -cpu "$CPU" -m 2048 -smp 4 -nic none \
   -nographic -no-reboot -kernel "$SHIPPED/vmlinuz" -initrd "$TMP/initrd.gz" \
   -append "console=ttyS0 rdinit=/init panic=-1 loglevel=4" > "$LOG" 2>&1 || true
 # Drop CRs and terminal control sequences (the firmware and the 7.0 kernel

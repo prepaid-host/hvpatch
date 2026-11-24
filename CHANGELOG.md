@@ -8,6 +8,13 @@ All notable changes to this project are documented here. The format follows
 
 ### Added
 
+- **Unattended pipeline** (`builder/pipeline.sh`, `builder/plan.sh`,
+  `docs/pipeline.md`): the build stages as containers of one Kubernetes
+  pod; builds new Proxmox kernel releases and catalog changes on its own and
+  publishes to the canary ring. The builder image is published as
+  `ghcr.io/prepaid-host/hvpatch-builder` with build provenance.
+- `fetch-source.sh`: `AUTO_LOCK=1` builds a release missing from
+  `kernels.lock` from the commit that released it (for unattended builds).
 - Releases ship a CycloneDX SBOM (`hvpatch.cdx.json`) with an SBOM
   attestation for the binaries and the package.
 - CI checks the minimum Rust version (1.88) and runs `cargo deny`
@@ -153,6 +160,7 @@ other worse; they are fixed here.
 
 ### Fixed
 
+- QEMU stage: the test VM has no network device (`-nic none`).
 - **7.0 builds:** `fetch-shipped.sh` took `/usr/lib/modules/<kver>`
   whenever it existed; the 7.0 packages ship the modules in
   `/lib/modules/<kver>` and only the headers' build link in the former,
