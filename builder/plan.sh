@@ -39,10 +39,22 @@ done | while read -r kver; do
     log "$kver: nothing published yet"
     echo "$kver 1 -"; exit 0
   fi
-  read -r level module built_from < <(python3 -I -c '
-import json, sys
+  # The published copy comes from the mirror: treat every field as untrusted
+  # and pass on only values of a strict form (they reach shell arithmetic
+  # and file paths).
+  fields=$(python3 -I -c '
+import json, re, sys
 m = json.load(open(sys.argv[1]))
-print(m["level"], m["module"], m.get("catalog_commit") or "unknown")' "$m")
+level, module, commit = m["level"], m["module"], m.get("catalog_commit") or "unknown"
+if type(level) is not int or not 0 < level < 1000000:
+    sys.exit("bad level")
+if not isinstance(module, str) or not re.fullmatch(r"klp_[A-Za-z0-9_]{1,100}\.ko", module):
+    sys.exit("bad module name")
+if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}(-dirty)?|unknown", commit):
+    sys.exit("bad catalog_commit")
+print(level, module, commit)' "$m") || die "$m: unexpected manifest content"
+  read -r level module built_from <<< "$fields"
+  [[ $level =~ ^[0-9]{1,6}$ ]] || die "$m: bad level"
   if [ "$built_from" != unknown ] && git -C "$CATALOG" cat-file -e "${built_from%-dirty}^{commit}" 2>/dev/null \
      && git -C "$CATALOG" diff --quiet "${built_from%-dirty}" "$COMMIT" -- .; then
     continue
