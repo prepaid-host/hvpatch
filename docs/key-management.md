@@ -78,7 +78,10 @@ mirror serves the same:
 | Manifest key (minisign, Ed25519) | `project-keys/manifest.pub` | key id `64C12AABF4A1E0D4` |
 | Module key (X.509, RSA 4096, until 2036) | `project-keys/module-cert.der` | SHA-256 `65:21:D8:87:79:53:C4:AF:5C:50:EC:8F:68:65:68:DB:9B:04:E0:32:2A:4F:8C:23:BB:A6:42:24:82:66:E6:AE` |
 
-The manifest key never leaves a dedicated signing machine; the mirror and
-the build host do not have it. The module key lives on the build host,
-read-only in the signing container. Secure Boot nodes enroll
-`module-cert.der` as MOK (`hvpatch mok enroll`).
+Project builds are made by the unattended pipeline (docs/pipeline.md): both
+keys are Kubernetes secrets of the build cluster, the module key mounted
+only into the signing container, the manifest key only into the publish
+container; the build container and the mirror have neither. Whoever
+controls that cluster could sign for every node that trusts this key; if
+that is not acceptable for you, build with your own keys. Secure Boot nodes
+enroll `module-cert.der` as MOK (`hvpatch mok enroll`).
