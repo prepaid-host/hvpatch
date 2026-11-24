@@ -78,7 +78,9 @@ wget https://github.com/prepaid-host/hvpatch/releases/latest/download/hvpatch_am
 apt install ./hvpatch_amd64.deb
 
 # 2. Point it at a repository and its signing key, and check the host
-hvpatch setup --repository https://klp.example.org --key https://klp.example.org/manifest.pub
+#    (project builds; or your own repository, see below)
+hvpatch setup --repository https://mirror.prepaid-host.io/hvpatch \
+  --key https://mirror.prepaid-host.io/hvpatch/manifest.pub --ring canary
 
 # 3. Load the livepatch for the running kernel
 hvpatch apply
@@ -98,11 +100,19 @@ gh attestation verify hvpatch_amd64.deb --repo prepaid-host/hvpatch
 A static binary (`hvpatch-x86_64-linux-musl`) is attached to each release as
 well, for hosts where you do not want the Debian package.
 
-With Secure Boot, enroll the module certificate once: run `hvpatch mok enroll`
-and confirm in MokManager on the next reboot (BMC or local console).
+With Secure Boot, enroll the module certificate once and confirm in
+MokManager on the next reboot (BMC or local console). For project builds:
 
-The repository can be the project's (once published) or your own, built with
-the pipeline in this repository: see [docs/self-hosting.md](docs/self-hosting.md).
+```bash
+curl -fsSo /etc/hvpatch/module-cert.der https://mirror.prepaid-host.io/hvpatch/module-cert.der
+hvpatch mok enroll
+```
+
+Project builds are published at <https://mirror.prepaid-host.io/hvpatch/>
+for the current kernels of the 7.0 and 7.3 series, signed with the keys in
+[`project-keys/`](project-keys/) (compare the key id with `hvpatch check`).
+They start in the `canary` ring. Or build and sign your own with the
+pipeline in this repository: see [docs/self-hosting.md](docs/self-hosting.md).
 
 ## How it works
 
@@ -218,7 +228,7 @@ out of scope.
 | 2 | Automatic pipeline: newest 3 kernels, Gate A, QEMU test, signing, repository | `builder/run.sh` per kernel done; scheduled CI planned |
 | 3 | Agent: check, status, apply, revert, boot unit, .deb, Ansible role | done (Ansible role and Checkmk check in `contrib/`) |
 | 4 | Tests under load, canary on AMD and Intel hardware, 24 h soak | nested tests, stalled transitions, Secure Boot, and a three-node 7.0 cluster with guests under load done; bare-metal canary and 24 h soak open |
-| 5 | Public project builds, status page, APT repository | status page generator done (`hvpatch-tool status-page`); public builds and APT repository planned |
+| 5 | Public project builds, status page, APT repository | project builds at mirror.prepaid-host.io (canary), status page generator done; APT repository planned |
 | 6 | Default 7.0 kernel series | experimental since 0.3.0 (7.0.14-30-pve); leaves experimental after several releases built and a soak on bare metal |
 
 ## FAQ
