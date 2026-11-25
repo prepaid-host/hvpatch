@@ -122,7 +122,9 @@ if [ "$STAGE" = prepare ]; then
 fi
 
 # Promotions and renewals (rings.sh) run in every publish, with or without
-# a build. PROMOTE=0 only renews; RING_MAINTENANCE=0 turns both off.
+# a build. PROMOTE=0 only renews; RING_MAINTENANCE=0 turns both off. Their
+# state (STATE/rings) guards against rollbacks on the web server: STATE must
+# not be mounted into the build container, like TRUST and LOCK_DIR.
 ring_maintenance() {
   [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
   "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}"

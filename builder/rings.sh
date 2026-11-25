@@ -98,7 +98,7 @@ held() {
 # check <kver> <ring>: verify what the ring serves and update STATE. Sets
 # LEVEL (0 if the ring is empty or must be left alone) and SHA.
 check() {
-  local kver=$1 ring=$2 m rl rs
+  local kver=$1 ring=$2 m rl
   LEVEL=0; SHA=""
   m="$REPO/v1/$kver/$ring/manifest.json"
   [ -f "$m" ] || return 0
@@ -109,13 +109,18 @@ check() {
     log "$kver $ring: the manifest is for $(field "$m" kernel) ring $(field "$m" ring); leaving it alone"; BAD=1; return 0
   fi
   local level; level=$(field "$m" level)
-  read -r rl rs <<< "$(recorded "$kver" "$ring")"
+  read -r rl _ <<< "$(recorded "$kver" "$ring")"
   if [ "$level" -lt "$rl" ]; then
-    # Going back is fine after the higher level was revoked (revoke.sh).
-    if ! revoked "$kver" "$rl" ""; then
-      log "$kver $ring serves level $level, but level $rl was published there: rollback? leaving it alone"; BAD=1; return 0
-    fi
-    record "$kver" "$ring" "$level" "$rs"
+    # Going back is fine after revocations (revoke.sh), to the highest level
+    # below that is not revoked: every level above it must be revoked.
+    local l
+    for (( l = level + 1; l <= rl; l++ )); do
+      if ! revoked "$kver" "$l" ""; then
+        log "$kver $ring serves level $level, but level $l was published there and is not revoked: rollback? leaving it alone"
+        BAD=1; return 0
+      fi
+    done
+    record "$kver" "$ring" "$level" "$NOW"
   elif [ "$level" -gt "$rl" ]; then
     record "$kver" "$ring" "$level" "$NOW"
   fi
