@@ -173,6 +173,19 @@ enum Cmd {
         ring: String,
         #[arg(long)]
         out: PathBuf,
+        /// Also set a fresh expiry, this many days from now (default: keep it).
+        #[arg(long)]
+        valid_days: Option<i64>,
+    },
+    /// Re-issue a manifest with a later expiry: same ring, module, level and
+    /// build time (agents count `delay_hours` from the build time).
+    Renew {
+        #[arg(long)]
+        manifest: PathBuf,
+        #[arg(long, default_value_t = 30)]
+        valid_days: i64,
+        #[arg(long)]
+        out: PathBuf,
     },
     /// List kernel CVEs that affect a Proxmox kernel and are not in the
     /// catalog, by priority (P0 known exploited or critical and reachable
@@ -473,17 +486,30 @@ fn run(cli: Cli) -> Result<bool> {
             );
             Ok(errs.is_empty())
         }
-        Cmd::Promote { manifest, ring, out } => {
+        Cmd::Promote { manifest, ring, out, valid_days } => {
             if !RINGS.contains(&ring.as_str()) {
                 bail!("unknown ring {ring}");
             }
             let mut m = Manifest::from_json(&read(&manifest)?)?;
+            refuse_expired(&m)?;
             let from = RINGS.iter().position(|r| *r == m.ring).unwrap();
             let to = RINGS.iter().position(|r| *r == ring).unwrap();
             if to <= from {
                 bail!("promotion goes canary -> early -> stable; {} -> {ring} is not a promotion", m.ring);
             }
             m.ring = ring;
+            if let Some(days) = valid_days {
+                m.expires = renewed_expiry(&m, days)?;
+            }
+            m.validate()?;
+            write(&out, m.to_json_pretty().as_bytes())?;
+            Ok(true)
+        }
+        Cmd::Renew { manifest, valid_days, out } => {
+            let mut m = Manifest::from_json(&read(&manifest)?)?;
+            refuse_expired(&m)?;
+            m.expires = renewed_expiry(&m, valid_days)?;
+            m.validate()?;
             write(&out, m.to_json_pretty().as_bytes())?;
             Ok(true)
         }
@@ -647,4 +673,26 @@ fn check_manifest(manifest: &Path, resolved: &Path, module: &Path, qemu_ok: Opti
         }
     }
     Ok(errs)
+}
+
+/// An expired manifest is never re-issued: renewing or promoting it would
+/// let an old manifest (one a repository host put back, say) come back to
+/// life with a fresh expiry.
+fn refuse_expired(m: &Manifest) -> anyhow::Result<()> {
+    if m.expires <= Utc::now() {
+        bail!("the manifest expired at {}; publish a fresh level instead", m.expires);
+    }
+    Ok(())
+}
+
+/// A new expiry `days` from now; it must lie after the current one.
+fn renewed_expiry(m: &Manifest, days: i64) -> anyhow::Result<chrono::DateTime<Utc>> {
+    if !(1..=366).contains(&days) {
+        bail!("--valid-days must be between 1 and 366");
+    }
+    let expires = Utc::now() + Duration::days(days);
+    if expires <= m.expires {
+        bail!("the manifest already expires at {}, not before {}", m.expires, expires);
+    }
+    Ok(expires)
 }

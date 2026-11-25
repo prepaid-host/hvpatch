@@ -10,6 +10,8 @@
 # one. Nothing from a local build directory is involved.
 #
 # MANIFEST_KEY (hvpatch-tool key) or MINISIGN_KEY (minisign) signs.
+# VALID_DAYS gives the promoted manifest a fresh expiry, this many days from
+# now (default: keep the lower ring's expiry).
 source "$(dirname "$0")/lib.sh"
 REPO=${1:?usage: promote.sh <repo-root> <kver> <early|stable> <pubkey>}; KVER=${2:?kver}; TO=${3:?ring}; PUB=${4:?pubkey}
 require hvpatch-tool python3 sha256sum
@@ -30,5 +32,5 @@ CURRENT=$(ring_level "$REPO" "$KVER" "$TO")
 
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
-hvpatch-tool promote --manifest "$SRC" --ring "$TO" --out "$TMP/manifest.json"
+hvpatch-tool promote --manifest "$SRC" --ring "$TO" --out "$TMP/manifest.json" ${VALID_DAYS:+--valid-days "$VALID_DAYS"}
 publish_ring "$REPO" "$KVER" "$TO" "$TMP/manifest.json" "$LEVEL" "kernel:$KVER level:$LEVEL ring:$TO promoted-from:$FROM"

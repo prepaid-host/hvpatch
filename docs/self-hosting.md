@@ -133,6 +133,23 @@ hash in the repository; nothing from a build directory is involved. With
 `MINISIGN_KEY` instead of `MANIFEST_KEY` both scripts sign with the
 `minisign` tool (e.g. an offline key).
 
+Manifests expire (30 days by default), and agents never apply an expired
+manifest fresh. A kernel that gets no new level needs its manifests renewed
+before then:
+
+```bash
+MANIFEST_KEY=… builder/rings.sh /srv/klp ~/hvpatch-keys/manifest.pub /var/lib/hvpatch-rings rings/holds
+```
+
+renews every ring manifest that expires within 10 days (same level and build
+time, new expiry) and promotes by age: canary to early after 3 days, early
+to stable after 7 more, never a revoked level or one listed in the holds
+file. `PROMOTE=0` only renews. The third argument is a state directory that
+only this job writes: it records the highest level each ring served and
+since when, so a repository host that puts an older manifest back cannot
+get it renewed or promoted. Run it from a timer, or let the unattended
+pipeline do it (docs/pipeline.md).
+
 Each ring is a symlink to a versioned directory
 (`canary -> canary.versions/<level>-<time>/`), switched atomically; older
 versions stay for audits. Serve `/srv/klp` over HTTPS with a server that

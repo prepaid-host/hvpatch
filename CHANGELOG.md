@@ -17,6 +17,12 @@ All notable changes to this project are documented here. The format follows
   pod; builds new Proxmox kernel releases and catalog changes on its own and
   publishes to the canary ring. The builder image is published as
   `ghcr.io/prepaid-host/hvpatch-builder` with build provenance.
+- **Ring maintenance** (`builder/rings.sh`): promotes by age (canary → early
+  after 3 days, → stable after 7 more) unless a level is revoked or listed
+  in `rings/holds`, and renews manifests before they expire. The pipeline
+  runs it on every run. New `hvpatch-tool renew`; `promote --valid-days`
+  (and `VALID_DAYS` for `promote.sh`) gives a promoted manifest a fresh
+  expiry.
 - `fetch-source.sh`: `AUTO_LOCK=1` builds a release missing from
   `kernels.lock` from the commit that released it (for unattended builds).
 - Releases ship a CycloneDX SBOM (`hvpatch.cdx.json`) with an SBOM
