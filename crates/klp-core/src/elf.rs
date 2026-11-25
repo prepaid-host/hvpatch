@@ -178,6 +178,52 @@ pub fn symbol_counts(bytes: &[u8]) -> Result<HashMap<String, u32>> {
     Ok(map)
 }
 
+/// Which functions of a relocatable object (`foo.o`, `vmlinux.o`) have an
+/// ftrace location, i.e. can be replaced by a livepatch: a `call __fentry__`
+/// relocation or an `__mcount_loc` entry within the first 16 bytes of the
+/// function. The kernel's `inline` implies `notrace`, so an out-of-line copy
+/// of an inline function has neither, and livepatch refuses it at load time
+/// ("failed to find location for function").
+///
+/// Per function name, one entry per symbol of that name (symbol table order).
+/// `None` if the object has no ftrace records at all.
+pub fn ftrace_entries(bytes: &[u8]) -> Result<Option<HashMap<String, Vec<bool>>>> {
+    use object::{ObjectSymbolTable, RelocationTarget, SymbolKind};
+    use std::collections::HashSet;
+    let file = object::File::parse(bytes).context("not a valid ELF file")?;
+    let Some(symtab) = file.symbol_table() else { return Ok(None) };
+    let mut locs: HashSet<(object::SectionIndex, u64)> = HashSet::new();
+    for sec in file.sections() {
+        let mcount = sec.name() == Ok("__mcount_loc");
+        for (off, rel) in sec.relocations() {
+            let RelocationTarget::Symbol(i) = rel.target() else { continue };
+            let Ok(sym) = symtab.symbol_by_index(i) else { continue };
+            if sym.name() == Ok("__fentry__") {
+                // The relocation is the call's operand, one byte after the opcode.
+                locs.insert((sec.index(), off.saturating_sub(1)));
+            } else if mcount && let Some(si) = sym.section_index() {
+                locs.insert((si, sym.address().wrapping_add(rel.addend() as u64)));
+            }
+        }
+    }
+    if locs.is_empty() {
+        return Ok(None);
+    }
+    let mut out: HashMap<String, Vec<bool>> = HashMap::new();
+    for s in file.symbols() {
+        if s.kind() != SymbolKind::Text || s.is_undefined() {
+            continue;
+        }
+        let (Ok(name), Some(si)) = (s.name(), s.section_index()) else { continue };
+        if name.is_empty() {
+            continue;
+        }
+        let has = (0..16).any(|o| locs.contains(&(si, s.address() + o)));
+        out.entry(name.to_owned()).or_default().push(has);
+    }
+    Ok(Some(out))
+}
+
 /// Extract the GNU build-id from a raw ELF note stream, as found in
 /// `/sys/kernel/notes` (vmlinux) or `/sys/module/<m>/notes/.note.gnu.build-id`.
 pub fn build_id_from_notes(notes: &[u8]) -> Option<String> {
@@ -230,6 +276,80 @@ pub fn parse_symvers(text: &str) -> HashMap<String, u32> {
 
 #[cfg(test)]
 pub(crate) mod testelf {
+    /// A relocatable with `traced` (starts with `call __fentry__`) and
+    /// `untraced` (no ftrace location), each in its own section after
+    /// 16 bytes of padding, like the kernel's -ffunction-sections builds.
+    pub fn ftrace_object(mcount: bool) -> Vec<u8> {
+        use object::write::Relocation;
+        use object::{RelocationEncoding, RelocationFlags, RelocationKind};
+        let mut obj = WObject::new(BinaryFormat::Elf, Architecture::X86_64, Endianness::Little);
+        let fentry = obj.add_symbol(Symbol {
+            name: b"__fentry__".to_vec(),
+            value: 0,
+            size: 0,
+            kind: SymbolKind::Text,
+            scope: SymbolScope::Unknown,
+            weak: false,
+            section: SymbolSection::Undefined,
+            flags: SymbolFlags::None,
+        });
+        let mut body = vec![0x90u8; 16];
+        body.extend_from_slice(&[0xe8, 0, 0, 0, 0, 0xc3]);
+        let add = |obj: &mut WObject, name: &str, traced: bool| {
+            let sec = obj.add_section(vec![], format!(".text.{name}").into_bytes(), SectionKind::Text);
+            obj.append_section_data(sec, &body, 16);
+            let sym = obj.add_symbol(Symbol {
+                name: name.as_bytes().to_vec(),
+                value: 16,
+                size: 6,
+                kind: SymbolKind::Text,
+                scope: SymbolScope::Compilation,
+                weak: false,
+                section: SymbolSection::Section(sec),
+                flags: SymbolFlags::None,
+            });
+            if traced && !mcount {
+                obj.add_relocation(
+                    sec,
+                    Relocation {
+                        offset: 17,
+                        symbol: fentry,
+                        addend: -4,
+                        flags: RelocationFlags::Generic {
+                            kind: RelocationKind::PltRelative,
+                            encoding: RelocationEncoding::X86Branch,
+                            size: 32,
+                        },
+                    },
+                )
+                .unwrap();
+            }
+            (sec, sym)
+        };
+        let (tsec, _) = add(&mut obj, "traced", true);
+        add(&mut obj, "untraced", false);
+        if mcount {
+            let sec_sym = obj.section_symbol(tsec);
+            let ml = obj.add_section(vec![], b"__mcount_loc".to_vec(), SectionKind::ReadOnlyData);
+            obj.append_section_data(ml, &[0u8; 8], 8);
+            obj.add_relocation(
+                ml,
+                Relocation {
+                    offset: 0,
+                    symbol: sec_sym,
+                    addend: 16,
+                    flags: RelocationFlags::Generic {
+                        kind: RelocationKind::Absolute,
+                        encoding: RelocationEncoding::Generic,
+                        size: 64,
+                    },
+                },
+            )
+            .unwrap();
+        }
+        obj.write().unwrap()
+    }
+
     use object::write::{Object as WObject, Symbol, SymbolSection};
     use object::{Architecture, BinaryFormat, Endianness, SectionKind, SymbolFlags, SymbolKind, SymbolScope};
 
@@ -285,6 +405,17 @@ pub(crate) mod testelf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ftrace_entries_from_fentry_calls_and_mcount_loc() {
+        for mcount in [false, true] {
+            let m = ftrace_entries(&testelf::ftrace_object(mcount)).unwrap().expect("has ftrace records");
+            assert_eq!(m["traced"], vec![true], "mcount={mcount}");
+            assert_eq!(m["untraced"], vec![false], "mcount={mcount}");
+        }
+        let plain = testelf::livepatch_module("m", "7.0.14-30-pve ", &[], &[]);
+        assert!(ftrace_entries(&plain).unwrap().is_none());
+    }
 
     #[test]
     fn modinfo_versions_klpsyms() {

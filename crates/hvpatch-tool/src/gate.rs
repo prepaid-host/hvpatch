@@ -11,6 +11,11 @@
 //!    module, and the position must be resolvable (unique if 0).
 //! 4. Patched functions (from `objtool klp diff`) exist in the shipped
 //!    kernel under exactly that name.
+//! 5. They equal the union of the reviewed catalog `functions`.
+//! 6. Each patched function has an ftrace location in the original object
+//!    (`call __fentry__`); `inline` implies `notrace`, and livepatch cannot
+//!    replace a function without one. Checked on our own original build,
+//!    which reproduces the shipped kernel.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -26,6 +31,8 @@ pub struct Report {
     pub checked_versions: usize,
     pub checked_klp_symbols: usize,
     pub checked_functions: usize,
+    /// Patched functions whose ftrace location was checked.
+    pub checked_ftrace: usize,
     /// Patched functions were compared with the reviewed catalog lists.
     pub compared_with_catalog: bool,
     pub errors: Vec<String>,
@@ -45,6 +52,68 @@ pub struct Inputs<'a> {
     /// Resolved catalog: the union of its reviewed `functions` must equal
     /// the function list above exactly.
     pub resolved: Option<&'a Path>,
+    /// `objtool klp diff` log (`path.o: changed function: name`) and the
+    /// directory of the original objects it names (klp-build's `1-orig`).
+    pub diff_log: Option<&'a Path>,
+    pub originals: Option<&'a Path>,
+}
+
+/// `path.o: changed function: name` lines of an objtool klp diff log.
+pub fn parse_diff_log(text: &str) -> Vec<(String, String)> {
+    text.lines()
+        .filter_map(|l| l.split_once(": changed function: "))
+        .map(|(o, f)| (o.trim().to_owned(), f.trim().to_owned()))
+        .collect()
+}
+
+/// Every changed function must have an ftrace location in its original
+/// object. Objects are read once each.
+fn check_ftrace(diff_log: &Path, originals: &Path, r: &mut Report) -> Result<()> {
+    let text = std::fs::read_to_string(diff_log).with_context(|| format!("reading {}", diff_log.display()))?;
+    let mut by_obj: std::collections::BTreeMap<String, Vec<String>> = Default::default();
+    for (o, f) in parse_diff_log(&text) {
+        by_obj.entry(o).or_default().push(f);
+    }
+    if by_obj.is_empty() {
+        r.errors.push(format!("ftrace: {} lists no changed functions", diff_log.display()));
+    }
+    for (obj, funcs) in by_obj {
+        // Paths come from objtool's log: keep them inside the originals dir.
+        let rel = Path::new(&obj);
+        if rel.is_absolute() || rel.components().any(|c| !matches!(c, std::path::Component::Normal(_))) {
+            r.errors.push(format!("ftrace: unexpected object path {obj:?} in the diff log"));
+            continue;
+        }
+        let path = originals.join(rel);
+        let bytes = match std::fs::read(&path) {
+            Ok(b) => b,
+            Err(e) => {
+                r.errors.push(format!("ftrace: original object {} not readable: {e}", path.display()));
+                continue;
+            }
+        };
+        let Some(entries) = elf::ftrace_entries(&bytes).with_context(|| format!("parsing {}", path.display()))? else {
+            r.errors.push(format!("ftrace: {obj} has no ftrace records (built without CONFIG_FUNCTION_TRACER?)"));
+            continue;
+        };
+        for f in funcs {
+            match entries.get(&f).map(Vec::as_slice) {
+                None | Some([]) => r.errors.push(format!("ftrace: {obj}: changed function {f} not found")),
+                Some(v) if v.iter().all(|&b| b) => {}
+                Some(v) if v.len() == 1 => r.errors.push(format!(
+                    "{obj}: {f} has no ftrace location (inline/notrace) and cannot be livepatched; \
+                     patch its callers instead (e.g. make it __always_inline in a per-series patch)"
+                )),
+                Some(v) => r.errors.push(format!(
+                    "{obj}: {} of {} symbols named {f} have no ftrace location (inline/notrace)",
+                    v.iter().filter(|&&b| !b).count(),
+                    v.len()
+                )),
+            }
+            r.checked_ftrace += 1;
+        }
+    }
+    Ok(())
 }
 
 /// Read a function list: one `object:function[,sympos]` per line.
@@ -235,6 +304,13 @@ pub fn run(i: &Inputs) -> Result<Report> {
         r.warnings.push("no function list given; patched functions not checked".into());
     }
 
+    // 6. ftrace locations in the original objects
+    match (i.diff_log, i.originals) {
+        (Some(d), Some(o)) => check_ftrace(d, o, &mut r)?,
+        (None, None) => r.warnings.push("no diff log and originals given; ftrace locations not checked".into()),
+        _ => r.errors.push("--diff-log and --originals go together".into()),
+    }
+
     if !elf::has_module_signature(&bytes) {
         r.warnings.push("module is not signed yet (expected before the signing step)".into());
     }
@@ -259,5 +335,19 @@ mod tests {
         assert!(e.iter().any(|l| l.contains("cmdline_proc_show is patched by the module but not listed")));
         assert!(e.iter().any(|l| l.contains("tcp_v4_rcv is listed") && l.contains("not patched")));
         assert!(compare_function_sets(&v(&[]), &v(&[])).iter().any(|l| l.contains("no changed functions")));
+    }
+
+    #[test]
+    fn diff_log_lines() {
+        let l = parse_diff_log(
+            "drivers/vhost/vringh.o: warning: objtool: x\ndrivers/vhost/vringh.o: changed function: __vringh_iov\nvmlinux.o: changed function: gup_fast_fallback\n",
+        );
+        assert_eq!(
+            l,
+            vec![
+                ("drivers/vhost/vringh.o".to_owned(), "__vringh_iov".to_owned()),
+                ("vmlinux.o".to_owned(), "gup_fast_fallback".to_owned())
+            ]
+        );
     }
 }
