@@ -27,6 +27,12 @@ had nothing to livepatch, at a catalog commit is not tried again until the
 catalog changes. Releases missing from `kernels.lock` are built with
 `AUTO_LOCK=1` from the commit that released them (logged).
 
+Only one run works on the volume at a time: `prepare` takes a lock that
+`publish` releases (or a failing stage). A run started by hand while another
+one is active does nothing. A lock older than `LOCK_STALE_MIN` minutes (420)
+comes from a killed pod and is taken over. The `run` directory of the volume
+holds the lock, so the publish container mounts it writable.
+
 ## Trust
 
 - The build stage runs kernel Makefiles and catalog patches. It never sees a

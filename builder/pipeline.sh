@@ -38,6 +38,8 @@
 #   SERIES, NEWEST  passed to plan.sh
 #   BUILDER_IMAGE   recorded in the source bundle
 #   TRUST           volume for the plan and checksums (default /trusted)
+#   POD_NAME        owner of the run lock (default the host name)
+#   LOCK_STALE_MIN  age in minutes after which a lock is taken over (420)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
 source "$HERE/lib.sh"
@@ -53,9 +55,38 @@ rsync_remote() {
 }
 SSH_DIR=${SSH_DIR:-/ssh}
 
+# One run at a time: the volume is shared, and the CronJob's Forbid policy
+# does not cover jobs created by hand. prepare takes the lock in RUN; it is
+# released when publish ends or a stage fails. A lock older than
+# LOCK_STALE_MIN minutes (default 420, longer than the job deadline) is left
+# over from a killed pod and is taken over.
+ME=${POD_NAME:-$(hostname)}
+LOCK=$RUN/lock
+release_lock() {
+  if [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$ME" ]; then rm -rf "$LOCK"; fi
+  return 0
+}
+release_on_error() {
+  local rc=$?
+  [ "$rc" -eq 0 ] || release_lock
+  exit "$rc"
+}
+
 if [ "$STAGE" = prepare ]; then
   mkdir -p "$RUN" "$STATE"
-  rm -f "$RUN/failed" "$RUN/none" "$TRUST/plan"
+  rm -f "$TRUST/plan"
+  if ! mkdir "$LOCK" 2>/dev/null; then
+    OWNER=$(cat "$LOCK/owner" 2>/dev/null || echo unknown)
+    if [ -z "$(find "$LOCK" -maxdepth 0 -mmin +"${LOCK_STALE_MIN:-420}")" ]; then
+      log "another run ($OWNER) is active; nothing to do"
+      exit 0
+    fi
+    log "taking over the stale lock of $OWNER"
+    rm -rf "$LOCK"; mkdir "$LOCK"
+  fi
+  echo "$ME" > "$LOCK/owner"
+  trap release_on_error EXIT
+  rm -f "$RUN/failed" "$RUN/none"
   G=(git -c core.hooksPath=/dev/null -c core.fsmonitor=false)
   if [ -d "$SRC/.git" ]; then
     "${G[@]}" -C "$SRC" fetch -q origin "${GIT_REF:-main}"
@@ -73,6 +104,7 @@ if [ "$STAGE" = prepare ]; then
   exit 0
 fi
 
+if [ "$STAGE" = publish ]; then trap release_lock EXIT; else trap release_on_error EXIT; fi
 [ -s "$TRUST/plan" ] || { log "$STAGE: nothing planned"; exit 0; }
 read -r KVER LEVEL PREV < "$TRUST/plan"
 W=$WORK/build/$KVER

@@ -258,8 +258,10 @@ timeout 1800 qemu-system-x86_64 -machine q35,accel="$ACCEL" -cpu "$CPU" -m 2048 
   -nographic -no-reboot -kernel "$SHIPPED/vmlinuz" -initrd "$TMP/initrd.gz" \
   -append "console=ttyS0 rdinit=/init panic=-1 loglevel=4" > "$LOG" 2>&1 || true
 # Drop CRs and terminal control sequences (the firmware and the 7.0 kernel
-# clear the console, which lands in front of the first HVPATCH: line).
-tr -d '\r' < "$LOG" | sed -E 's/\x1b(\[[0-9;?]*[A-Za-z]|[@-Z\\^_`a-z])//g' > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
+# clear the console, which lands in front of the first HVPATCH: line), and
+# start every HVPATCH: marker on its own line (under TCG, SeaBIOS leaves
+# "Booting from ROM.." without a newline in front of it).
+tr -d '\r' < "$LOG" | sed -E -e 's/\x1b(\[[0-9;?]*[A-Za-z]|[@-Z\\^_`a-z])//g' -e 's/(.)HVPATCH:/\1\nHVPATCH:/g' > "$LOG.tmp" && mv "$LOG.tmp" "$LOG"
 grep '^HVPATCH:STEP:' "$LOG" | sed 's/^HVPATCH:STEP:/  /' >&2 || true
 if ! grep -q '^HVPATCH:OK$' "$LOG"; then
   grep '^HVPATCH:FAIL:' "$LOG" >&2 || true
