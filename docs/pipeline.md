@@ -40,6 +40,12 @@ also runs `builder/rings.sh`:
 - every ring manifest that expires within `RENEW_DAYS` (10) is re-signed
   with a new expiry `VALID_DAYS` (30) from now, same level and build time.
   Revoked levels are left to expire.
+- the published repository is synced from the web server, so `rings.sh`
+  trusts none of it: every manifest and `v1/revoked.json` must verify, and
+  the time a level spent in a ring and the highest level each ring served
+  are recorded in `state/rings` on the volume (only prepare and publish
+  mount it). An older manifest put back on the server is neither renewed
+  nor promoted, and an expired one never comes back.
 
 Promotion goes by time only: the pipeline cannot tell whether canary nodes
 had problems. Watch the canary nodes (contrib/prometheus) and add a hold or

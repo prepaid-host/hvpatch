@@ -138,13 +138,16 @@ manifest fresh. A kernel that gets no new level needs its manifests renewed
 before then:
 
 ```bash
-MANIFEST_KEY=… builder/rings.sh /srv/klp ~/hvpatch-keys/manifest.pub rings/holds
+MANIFEST_KEY=… builder/rings.sh /srv/klp ~/hvpatch-keys/manifest.pub /var/lib/hvpatch-rings rings/holds
 ```
 
 renews every ring manifest that expires within 10 days (same level and build
 time, new expiry) and promotes by age: canary to early after 3 days, early
 to stable after 7 more, never a revoked level or one listed in the holds
-file. `PROMOTE=0` only renews. Run it from a timer, or let the unattended
+file. `PROMOTE=0` only renews. The third argument is a state directory that
+only this job writes: it records the highest level each ring served and
+since when, so a repository host that puts an older manifest back cannot
+get it renewed or promoted. Run it from a timer, or let the unattended
 pipeline do it (docs/pipeline.md).
 
 Each ring is a symlink to a versioned directory

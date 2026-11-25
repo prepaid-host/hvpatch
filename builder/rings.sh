@@ -10,20 +10,30 @@
 #     now. Without this, a kernel that gets no new level stops being
 #     installable when its manifest expires.
 #
-# Nothing is promoted that is revoked (v1/revoked.json) or held. The holds
-# file lists "<kernel|*> <level|*> <reason>" per line (# starts a comment);
-# "* * <reason>" stops all promotions. Revoked levels are not renewed either.
-# Only manifests that verify with the given public key are promoted
-# (promote.sh) or renewed.
+# The repository may come from a host this script does not trust (it is
+# synced from the web server). So:
+#   - every manifest must verify with the public key and name the kernel and
+#     ring it is served as; expired manifests are never renewed
+#   - STATE (a directory only this pipeline writes) records per kernel and
+#     ring the highest level seen and since when. A ring that serves a lower
+#     level than recorded is a rollback and is left alone, and the time a
+#     level spent in a ring is counted from STATE, not from file names
+#   - v1/revoked.json must verify too, and its sequence must not go back or
+#     the file vanish; otherwise nothing is promoted or renewed
 #
-# usage: rings.sh <repo-root> <manifest-pubkey> [holds-file]
+# Nothing is promoted that is revoked or held. The holds file lists
+# "<kernel|*> <level|*> <reason>" per line (# starts a comment); "* * <reason>"
+# stops all promotions. Revoked levels are not renewed either.
+#
+# usage: rings.sh <repo-root> <manifest-pubkey> <state-dir> [holds-file]
 #
 # MANIFEST_KEY (hvpatch-tool key) or MINISIGN_KEY (minisign) signs.
-# PROMOTE=0 only renews. Exits 1 if anything could not be checked or
-# changed (after doing everything else).
+# PROMOTE=0 only renews. Exits 1 if anything looked wrong or could not be
+# changed (after doing everything else that is safe).
 source "$(dirname "$0")/lib.sh"
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=${1:?usage: rings.sh <repo-root> <manifest-pubkey> [holds-file]}; PUB=${2:?pubkey}; HOLDS=${3:-}
+REPO=${1:?usage: rings.sh <repo-root> <manifest-pubkey> <state-dir> [holds-file]}
+PUB=${2:?pubkey}; STATE=${3:?state dir}; HOLDS=${4:-}
 require hvpatch-tool python3 date
 EARLY_DAYS=${PROMOTE_EARLY_DAYS:-3}; STABLE_DAYS=${PROMOTE_STABLE_DAYS:-7}
 RENEW_DAYS=${RENEW_DAYS:-10}; VALID_DAYS=${VALID_DAYS:-30}
@@ -31,23 +41,48 @@ for n in "$EARLY_DAYS" "$STABLE_DAYS" "$RENEW_DAYS" "$VALID_DAYS"; do
   [[ "$n" =~ ^[0-9]{1,3}$ ]] || die "day counts must be small integers"
 done
 [ -z "$HOLDS" ] || [ -f "$HOLDS" ] || die "holds file $HOLDS not found"
+mkdir -p "$STATE"
 NOW=$(date -u +%s)
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 BAD=0
 
-# When <level> first reached <ring>: the oldest <ring>.versions/<level>-<stamp>
-# (renewals add newer ones). Empty if unknown.
-first_published() {
-  local d stamp oldest=""
-  for d in "$1/$2.versions/$3-"*; do
-    [ -d "$d" ] || continue
-    stamp=${d##*/"$3"-}
-    [[ "$stamp" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] || continue
-    if [ -z "$oldest" ] || [[ "$stamp" < "$oldest" ]]; then oldest=$stamp; fi
-  done
-  [ -n "$oldest" ] || return 0
-  date -u -d "${oldest:0:4}-${oldest:4:2}-${oldest:6:2} ${oldest:9:2}:${oldest:11:2}:${oldest:13:2}" +%s
+field() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }
+
+# Recorded "<level> <since>" for a kernel and ring ("0 0" if none).
+recorded() {
+  local f="$STATE/$1.$2" l s
+  if read -r l s 2>/dev/null < "$f" && [[ "$l" =~ ^[0-9]{1,6}$ ]] && [[ "$s" =~ ^[0-9]{1,12}$ ]]; then
+    echo "$l $s"
+  else
+    echo "0 0"
+  fi
+}
+record() { echo "$3 $4" > "$STATE/$1.$2.tmp" && mv "$STATE/$1.$2.tmp" "$STATE/$1.$2"; }
+
+# Revocations: verified, sequence never lower than recorded.
+SEQ_FILE=$STATE/revoked.sequence
+SEQ_SEEN=$(cat "$SEQ_FILE" 2>/dev/null || echo 0)
+[[ "$SEQ_SEEN" =~ ^[0-9]{1,12}$ ]] || SEQ_SEEN=0
+LIST=$REPO/v1/revoked.json
+if [ -f "$LIST" ]; then
+  hvpatch-tool verify --pubkey "$PUB" "$LIST" >/dev/null || die "v1/revoked.json does not verify; not promoting or renewing anything"
+  SEQ=$(field "$LIST" sequence)
+  [[ "$SEQ" =~ ^[0-9]{1,12}$ ]] || die "v1/revoked.json: bad sequence"
+  [ "$SEQ" -ge "$SEQ_SEEN" ] || die "v1/revoked.json went back from sequence $SEQ_SEEN to $SEQ; not promoting or renewing anything"
+  echo "$SEQ" > "$SEQ_FILE"
+elif [ "$SEQ_SEEN" -gt 0 ]; then
+  die "v1/revoked.json is gone (sequence $SEQ_SEEN was published); not promoting or renewing anything"
+fi
+# revoked <kver> <level> <sha256>
+revoked() {
+  [ -f "$LIST" ] || return 1
+  python3 -I -c '
+import json, sys
+d = json.load(open(sys.argv[1]))
+k, l, h = sys.argv[2], int(sys.argv[3]), sys.argv[4]
+sys.exit(0 if any(r.get("sha256") == h or (r.get("kernel") == k and r.get("level") == l) for r in d.get("revoked", [])) else 1)
+' "$LIST" "$1" "$2" "$3"
 }
 
 held() {
@@ -60,33 +95,47 @@ held() {
   return 1
 }
 
-revoked() {
-  [ -f "$REPO/v1/revoked.json" ] || return 1
-  python3 -I -c '
-import json, sys
-d = json.load(open(sys.argv[1]))
-sys.exit(0 if any(r.get("kernel") == sys.argv[2] and r.get("level") == int(sys.argv[3]) for r in d.get("revoked", [])) else 1)
-' "$REPO/v1/revoked.json" "$1" "$2"
+# check <kver> <ring>: verify what the ring serves and update STATE. Sets
+# LEVEL (0 if the ring is empty or must be left alone) and SHA.
+check() {
+  local kver=$1 ring=$2 m rl rs
+  LEVEL=0; SHA=""
+  m="$REPO/v1/$kver/$ring/manifest.json"
+  [ -f "$m" ] || return 0
+  if ! hvpatch-tool verify --pubkey "$PUB" "$m" >/dev/null; then
+    log "$kver $ring: the manifest does not verify with $PUB; leaving it alone"; BAD=1; return 0
+  fi
+  if [ "$(field "$m" kernel)" != "$kver" ] || [ "$(field "$m" ring)" != "$ring" ]; then
+    log "$kver $ring: the manifest is for $(field "$m" kernel) ring $(field "$m" ring); leaving it alone"; BAD=1; return 0
+  fi
+  local level; level=$(field "$m" level)
+  read -r rl rs <<< "$(recorded "$kver" "$ring")"
+  if [ "$level" -lt "$rl" ]; then
+    # Going back is fine after the higher level was revoked (revoke.sh).
+    if ! revoked "$kver" "$rl" ""; then
+      log "$kver $ring serves level $level, but level $rl was published there: rollback? leaving it alone"; BAD=1; return 0
+    fi
+    record "$kver" "$ring" "$level" "$rs"
+  elif [ "$level" -gt "$rl" ]; then
+    record "$kver" "$ring" "$level" "$NOW"
+  fi
+  LEVEL=$level; SHA=$(field "$m" sha256)
 }
-
-field() { python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))[sys.argv[2]])' "$1" "$2"; }
 
 # promote <kver> <from> <to> <days>
 promote() {
-  local kver=$1 from=$2 to=$3 days=$4 base level since
-  base="$REPO/v1/$kver"
-  [ -f "$base/$from/manifest.json" ] || return 0
-  level=$(ring_level "$REPO" "$kver" "$from")
-  [ "$level" -gt "$(ring_level "$REPO" "$kver" "$to")" ] || return 0
-  since=$(first_published "$base" "$from" "$level")
-  if [ -z "$since" ]; then
-    log "$kver level $level: no publication time in $from.versions; not promoting"
-    return 0
-  fi
+  local kver=$1 from=$2 to=$3 days=$4 level sha to_level rl since
+  check "$kver" "$from"; level=$LEVEL; sha=$SHA
+  [ "$level" -gt 0 ] || return 0
+  check "$kver" "$to"; to_level=$LEVEL
+  read -r rl _ <<< "$(recorded "$kver" "$to")"
+  [ "$level" -gt "$to_level" ] && [ "$level" -gt "$rl" ] || return 0
+  read -r _ since <<< "$(recorded "$kver" "$from")"
   [ $(( NOW - since )) -ge $(( days * 86400 )) ] || return 0
-  if revoked "$kver" "$level"; then log "$kver level $level is revoked; not promoting"; return 0; fi
+  if revoked "$kver" "$level" "$sha"; then log "$kver level $level is revoked; not promoting"; return 0; fi
   if held "$kver" "$level"; then log "$kver level $level is held; not promoting to $to"; return 0; fi
   if VALID_DAYS=$VALID_DAYS "$HERE/promote.sh" "$REPO" "$kver" "$to" "$PUB"; then
+    record "$kver" "$to" "$level" "$NOW"
     PROMOTED="$PROMOTED $kver/$to"
   else
     log "promoting $kver level $level to $to failed"; BAD=1
@@ -95,18 +144,18 @@ promote() {
 
 # renew <kver> <ring>
 renew() {
-  local kver=$1 ring=$2 m level expires
+  local kver=$1 ring=$2 m expires
+  check "$kver" "$ring"
+  [ "$LEVEL" -gt 0 ] || return 0
   m="$REPO/v1/$kver/$ring/manifest.json"
-  [ -f "$m" ] || return 0
-  if ! hvpatch-tool verify --pubkey "$PUB" "$m" >/dev/null; then
-    log "$kver $ring: the manifest does not verify with $PUB; not renewing"; BAD=1; return 0
-  fi
-  level=$(field "$m" level)
   expires=$(date -u -d "$(field "$m" expires)" +%s)
   [ $(( expires - NOW )) -lt $(( RENEW_DAYS * 86400 )) ] || return 0
-  if revoked "$kver" "$level"; then log "$kver level $level is revoked; letting its $ring manifest expire"; return 0; fi
+  if [ "$expires" -le "$NOW" ]; then
+    log "$kver $ring: level $LEVEL expired; it is not renewed (publish a fresh level)"; BAD=1; return 0
+  fi
+  if revoked "$kver" "$LEVEL" "$SHA"; then log "$kver level $LEVEL is revoked; letting its $ring manifest expire"; return 0; fi
   if hvpatch-tool renew --manifest "$m" --valid-days "$VALID_DAYS" --out "$TMP/manifest.json" \
-    && publish_ring "$REPO" "$kver" "$ring" "$TMP/manifest.json" "$level" "kernel:$kver level:$level ring:$ring renewed"; then
+    && publish_ring "$REPO" "$kver" "$ring" "$TMP/manifest.json" "$LEVEL" "kernel:$kver level:$LEVEL ring:$ring renewed"; then
     RENEWED=$(( RENEWED + 1 ))
   else
     log "renewing $kver $ring failed"; BAD=1

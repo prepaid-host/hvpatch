@@ -125,7 +125,7 @@ fi
 # a build. PROMOTE=0 only renews; RING_MAINTENANCE=0 turns both off.
 ring_maintenance() {
   [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
-  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "${HOLDS:-$SRC/rings/holds}"
+  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}"
 }
 if [ "$STAGE" = publish ]; then trap release_lock EXIT; else trap release_on_error EXIT; fi
 if [ "$STAGE" = publish ] && { [ ! -s "$TRUST/plan" ] || { [ -e "$RUN/none" ] && [ ! -e "$RUN/failed" ]; }; }; then

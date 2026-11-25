@@ -491,6 +491,7 @@ fn run(cli: Cli) -> Result<bool> {
                 bail!("unknown ring {ring}");
             }
             let mut m = Manifest::from_json(&read(&manifest)?)?;
+            refuse_expired(&m)?;
             let from = RINGS.iter().position(|r| *r == m.ring).unwrap();
             let to = RINGS.iter().position(|r| *r == ring).unwrap();
             if to <= from {
@@ -506,6 +507,7 @@ fn run(cli: Cli) -> Result<bool> {
         }
         Cmd::Renew { manifest, valid_days, out } => {
             let mut m = Manifest::from_json(&read(&manifest)?)?;
+            refuse_expired(&m)?;
             m.expires = renewed_expiry(&m, valid_days)?;
             m.validate()?;
             write(&out, m.to_json_pretty().as_bytes())?;
@@ -671,6 +673,16 @@ fn check_manifest(manifest: &Path, resolved: &Path, module: &Path, qemu_ok: Opti
         }
     }
     Ok(errs)
+}
+
+/// An expired manifest is never re-issued: renewing or promoting it would
+/// let an old manifest (one a repository host put back, say) come back to
+/// life with a fresh expiry.
+fn refuse_expired(m: &Manifest) -> anyhow::Result<()> {
+    if m.expires <= Utc::now() {
+        bail!("the manifest expired at {}; publish a fresh level instead", m.expires);
+    }
+    Ok(())
 }
 
 /// A new expiry `days` from now; it must lie after the current one.
