@@ -173,7 +173,12 @@ case "$STAGE" in
     find "$WORK/build" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2- \
       | tail -n +"$(( ${KEEP_TREES:-3} + 1 ))" | while read -r d; do
       [ "$d" = "$W" ] && continue
-      [ -d "$d/src" ] && ! [ -L "$d/src" ] && { log "removing cached kernel tree $d/src"; rm -rf --one-file-system "$d/src"; }
+      # An if, not &&: a false test as the last command would end the loop
+      # (and with pipefail the stage) with a failure.
+      if [ -d "$d/src" ] && [ ! -L "$d/src" ]; then
+        log "removing cached kernel tree $d/src"
+        rm -rf --one-file-system "$d/src"
+      fi
     done
     # Always fresh: a cached copy could have been changed by an earlier build.
     rm -rf "$W/shipped"; mkdir -p "$W/shipped"
