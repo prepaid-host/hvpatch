@@ -22,6 +22,8 @@ use serde::Serialize;
 pub struct Dyad {
     pub vuln: Option<String>,
     pub fixed: Option<String>,
+    /// Commit of the fix in the release `fixed` names.
+    pub fixed_commit: Option<String>,
 }
 
 pub fn parse_dyad(text: &str) -> Vec<Dyad> {
@@ -30,7 +32,7 @@ pub fn parse_dyad(text: &str) -> Vec<Dyad> {
         .filter(|l| !l.trim_start().starts_with('#') && !l.trim().is_empty())
         .filter_map(|l| {
             let f: Vec<&str> = l.trim().split(':').collect();
-            (f.len() == 4).then(|| Dyad { vuln: opt(f[0]), fixed: opt(f[2]) })
+            (f.len() == 4).then(|| Dyad { vuln: opt(f[0]), fixed: opt(f[2]), fixed_commit: opt(f[3]) })
         })
         .collect()
 }
@@ -199,11 +201,12 @@ pub fn commit_ids(log: &str) -> HashSet<String> {
             .map(str::to_ascii_lowercase);
         let mut refs: Vec<String> = own.iter().cloned().collect();
         for l in block.lines() {
-            for m in ["cherry picked from commit", "upstream commit"] {
+            for m in ["cherry picked from commit", "backported from commit", "upstream commit"] {
                 refs.extend(sha_after(l, m).map(str::to_ascii_lowercase));
             }
             let t = l.trim();
-            if let Some(rest) = t.strip_prefix("commit ")
+            // "commit <sha> upstream." (stable), also capitalised (Ubuntu).
+            if let Some(rest) = t.get(..7).filter(|p| p.eq_ignore_ascii_case("commit ")).map(|_| &t[7..])
                 && rest.len() > 40
                 && rest.is_char_boundary(40)
                 && rest[40..].trim_start().starts_with("upstream")
@@ -282,14 +285,28 @@ pub fn scan(vulns: &Path, upstream: &str, known: &HashSet<String>, feeds: &Feeds
             if known.contains(&id) {
                 continue;
             }
-            let (hit, fix_stable) = affected(&parse_dyad(&std::fs::read_to_string(&p)?), upstream);
+            let dyads = parse_dyad(&std::fs::read_to_string(&p)?);
+            let (hit, fix_stable) = affected(&dyads, upstream);
             if !hit {
                 continue;
             }
             let mainline_fix: Vec<String> = std::fs::read_to_string(p.with_extension("sha1"))
                 .map(|s| s.split_whitespace().map(str::to_owned).collect())
                 .unwrap_or_default();
-            if !mainline_fix.is_empty() && mainline_fix.iter().all(|c| feeds.contained.contains(c)) {
+            // Contained if the tree has every mainline fix. `.sha1` also lists
+            // commits that exist only in stable branches, which a backport
+            // never names, so prefer the mainline commits of the dyads.
+            let mainline_dyads: Vec<&String> = dyads
+                .iter()
+                .filter(|d| d.fixed.as_deref().is_some_and(is_mainline))
+                .filter_map(|d| d.fixed_commit.as_ref())
+                .collect();
+            let contained = if mainline_dyads.is_empty() {
+                !mainline_fix.is_empty() && mainline_fix.iter().all(|c| feeds.contained.contains(c))
+            } else {
+                mainline_dyads.iter().all(|c| feeds.contained.contains(*c))
+            };
+            if contained {
                 continue;
             }
             let json: serde_json::Value = std::fs::read(p.with_extension("json"))
@@ -474,6 +491,7 @@ mod tests {
         // A backport in the tree names the mainline commit.
         let d = "d".repeat(40);
         std::fs::write(y.join("CVE-2026-1.sha1"), format!("{d}\n")).unwrap();
+        std::fs::write(y.join("CVE-2026-1.dyad"), DYAD.replace(":ddd", &format!(":{d}"))).unwrap();
         let e = "e".repeat(40);
         feeds.contained = commit_ids(&format!("\0{e}\nipv4: x\n\n(cherry picked from commit {d})\n"));
         assert!(scan(t.path(), "7.0.14", &HashSet::new(), &feeds).unwrap().is_empty());
@@ -483,5 +501,24 @@ mod tests {
             "\0{f}\nRevert \"ipv4: x\"\n\nThis reverts commit {e}.\n\0{e}\nipv4: x\n\n(cherry picked from commit {d})\n"
         ));
         assert_eq!(scan(t.path(), "7.0.14", &HashSet::new(), &feeds).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn contained_by_mainline_commit() {
+        let t = tempfile::tempdir().unwrap();
+        let y = t.path().join("cve/published/2026");
+        std::fs::create_dir_all(&y).unwrap();
+        let (d, s, e) = ("d".repeat(40), "5".repeat(40), "e".repeat(40));
+        // Fixed in mainline 7.3 by d and in 6.12.113 by s; .sha1 lists both.
+        std::fs::write(y.join("CVE-2026-1.dyad"), format!("2.6.27:aaa:6.12.113:{s}\n2.6.27:aaa:7.3:{d}\n")).unwrap();
+        std::fs::write(y.join("CVE-2026-1.sha1"), format!("{d}\n{s}\n")).unwrap();
+        let mut feeds = Feeds { kev: HashSet::new(), epss: HashMap::new(), contained: HashSet::new() };
+        assert_eq!(scan(t.path(), "7.0.14", &HashSet::new(), &feeds).unwrap().len(), 1);
+        // The tree's backport names only the mainline commit, capitalised.
+        feeds.contained = commit_ids(&format!("\0{e}\nipv4: x\n\nCommit {d} upstream.\n"));
+        assert!(feeds.contained.contains(&d));
+        assert!(scan(t.path(), "7.0.14", &HashSet::new(), &feeds).unwrap().is_empty());
+        feeds.contained = commit_ids(&format!("\0{e}\nipv4: x\n\n(backported from commit {d})\n"));
+        assert!(scan(t.path(), "7.0.14", &HashSet::new(), &feeds).unwrap().is_empty());
     }
 }
