@@ -1,3 +1,11 @@
+hvpatch (0.4.0-1) trixie; urgency=medium
+
+  * Project builds for the current Proxmox VE 9 kernels at
+    mirror.prepaid-host.io, made by an unattended pipeline; ring
+    maintenance (promotion by age, manifest renewal before expiry).
+
+ -- Christopher Sakel <christopher.sakel@icloud.com>  Wed, 25 Nov 2026 08:00:00 +0000
+
 hvpatch (0.3.0-1) trixie; urgency=medium
 
   * Experimental support for the 7.0 kernel series (tested with

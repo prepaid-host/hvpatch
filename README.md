@@ -31,7 +31,11 @@ over an existing pve-klp node; see the [changelog](CHANGELOG.md).*
 >   cluster with loaded guests, no lost guest packet during `apply`
 >   ([docs/kernel-7.0.md](docs/kernel-7.0.md)).
 >
-> No project builds of livepatch modules are published yet: build your own
+> Project builds for the current 7.0 and 7.3 kernels are published at
+> <https://mirror.prepaid-host.io/hvpatch/>, built, tested and signed by
+> [an unattended pipeline](docs/pipeline.md): a new level goes to `canary`
+> first, to `early` after 3 days and to `stable` after 7 more. The catalog
+> is still small, so a kernel can have nothing to patch. Or build your own
 > with [docs/self-hosting.md](docs/self-hosting.md). Feedback and
 > [test reports](https://github.com/prepaid-host/hvpatch/issues/new?template=test_report.yml)
 > from non-production hosts are very welcome.

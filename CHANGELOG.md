@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+
+Ready-made livepatches: the project now builds, tests and signs modules for
+the current Proxmox VE 9 kernels on its own and publishes them at
+<https://mirror.prepaid-host.io/hvpatch/> (canary ring first, promoted to
+early and stable by age). Point a node at the mirror and trust the project
+key (`project-keys/manifest.pub`, plus `module-cert.der` with Secure Boot):
+see the README's quick start.
+
+Upgrading: install the new package on the nodes; the configuration is
+unchanged. Self-hosted repositories should run `builder/rings.sh` from a
+timer (or the pipeline): manifests expire after 30 days, and without a new
+level nothing renews them.
+
 ### Added
 
 - **Project builds** at <https://mirror.prepaid-host.io/hvpatch/>
@@ -507,7 +521,8 @@ Use on test hosts only.
 - Release workflow with static binaries, SHA256SUMS and build provenance
   attestations.
 
-[Unreleased]: https://github.com/prepaid-host/hvpatch/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/prepaid-host/hvpatch/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/prepaid-host/hvpatch/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/prepaid-host/hvpatch/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/prepaid-host/hvpatch/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/prepaid-host/hvpatch/compare/v0.1.6...v0.2.0
