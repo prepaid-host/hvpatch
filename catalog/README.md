@@ -72,6 +72,9 @@ rebase the later patch onto the earlier one.
   one review is required (and `lint` enforces one); entries name their
   reviewer in `reviewed_by`. This goes back to two as soon as a second
   maintainer joins.
+- Draft entries carry `reviewed_by: ["pending-review"]`. `lint` rejects the
+  placeholder, so such an entry cannot be merged or built on main; test
+  builds of a draft branch set `HVPATCH_ALLOW_PENDING_REVIEW=1`.
 - Signed commits, protected main branch.
 - A backport for a specific kernel is a separate patch with its own review.
 - v1 entries use no callbacks and no shadow variables. That keeps replacing a

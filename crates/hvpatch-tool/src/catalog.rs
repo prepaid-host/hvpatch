@@ -106,6 +106,20 @@ pub fn load(catalog: &Path) -> Result<Vec<Loaded>> {
 /// CONTRIBUTING.md).
 pub const MIN_REVIEWERS: usize = 1;
 
+/// What a draft entry has in `reviewed_by` until someone has reviewed it.
+pub const REVIEW_PLACEHOLDER: &str = "pending-review";
+
+/// The problem for an entry whose review is still pending, if any. Kept out
+/// of [`lint`] so that test builds of draft branches can let it pass; CI and
+/// the pipeline on main never do.
+pub fn pending_review(l: &Loaded) -> Option<String> {
+    l.entry.reviewed_by.iter().any(|r| r.trim() == REVIEW_PLACEHOLDER).then(|| {
+        format!(
+            "reviewed_by still has the placeholder {REVIEW_PLACEHOLDER:?}; replace it with the reviewer's GitHub login"
+        )
+    })
+}
+
 /// Static lint for one entry (CI stage 0, before merge).
 pub fn lint(l: &Loaded) -> Vec<String> {
     let e = &l.entry;
@@ -711,6 +725,30 @@ class: not-livepatchable
         assert!(p.iter().any(|m| m.contains("reason")));
         assert!(!p.iter().any(|m| m.contains("psa")), "empty psa means none: {p:?}");
         assert!(e[0].entry.psa.is_none() && e[0].entry.mitigation.is_none());
+    }
+
+    #[test]
+    fn pending_review_placeholder_is_reported_separately() {
+        let t = tempfile::tempdir().unwrap();
+        write(
+            t.path(),
+            "CVE-2026-0011",
+            r#"
+id: CVE-2026-0011
+title: x
+upstream_commits: ["0123456789abcdef"]
+severity: low
+class: needs-manual
+reason: "later"
+reviewed_by: ["pending-review"]
+"#,
+        );
+        let e = load(t.path()).unwrap();
+        assert!(lint(&e[0]).is_empty(), "{:?}", lint(&e[0]));
+        assert!(pending_review(&e[0]).unwrap().contains("placeholder"));
+        let mut done = e[0].clone();
+        done.entry.reviewed_by = vec!["c-sakel".into()];
+        assert!(pending_review(&done).is_none());
     }
 
     #[test]
