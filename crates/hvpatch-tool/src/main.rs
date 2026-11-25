@@ -111,6 +111,13 @@ enum Cmd {
         /// reviewed `functions` of its entries.
         #[arg(long)]
         resolved: Option<PathBuf>,
+        /// `objtool klp diff` log; with --originals, every changed function
+        /// must have an ftrace location in its original object.
+        #[arg(long, requires = "originals")]
+        diff_log: Option<PathBuf>,
+        /// Original objects named in the diff log (klp-build's klp-tmp/1-orig).
+        #[arg(long, requires = "diff_log")]
+        originals: Option<PathBuf>,
         #[arg(long)]
         json: bool,
     },
@@ -378,7 +385,19 @@ fn run(cli: Cli) -> Result<bool> {
             }
             Ok(true)
         }
-        Cmd::GateA { module, kernel, expected_name, system_map, symvers, modules_dir, functions, resolved, json } => {
+        Cmd::GateA {
+            module,
+            kernel,
+            expected_name,
+            system_map,
+            symvers,
+            modules_dir,
+            functions,
+            resolved,
+            diff_log,
+            originals,
+            json,
+        } => {
             let r = gate::run(&gate::Inputs {
                 module: &module,
                 kernel_release: &kernel,
@@ -388,6 +407,8 @@ fn run(cli: Cli) -> Result<bool> {
                 modules_dir: modules_dir.as_deref(),
                 functions: functions.as_deref(),
                 resolved: resolved.as_deref(),
+                diff_log: diff_log.as_deref(),
+                originals: originals.as_deref(),
             })?;
             if json {
                 println!("{}", serde_json::to_string_pretty(&r)?);
@@ -406,6 +427,9 @@ fn run(cli: Cli) -> Result<bool> {
                     r.checked_functions,
                     if r.compared_with_catalog { ", equal to the reviewed catalog" } else { "" }
                 );
+                if r.checked_ftrace > 0 {
+                    println!("gate A: ftrace location checked for {} patched functions", r.checked_ftrace);
+                }
             }
             Ok(r.ok)
         }

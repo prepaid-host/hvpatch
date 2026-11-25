@@ -115,7 +115,8 @@ log "gate A"
 hvpatch-tool gate-a --module "$OUT/$NAME.ko" --kernel "$KVER" --expected-name "$NAME" \
   --system-map "$SHIPPED/System.map" --symvers "$SHIPPED/Module.symvers" \
   --modules-dir "$SHIPPED/modules" \
-  --functions "$FUNCS" --resolved "$OUT/resolved.json" | tee "$OUT/gate-a.txt"
+  --functions "$FUNCS" --resolved "$OUT/resolved.json" \
+  --diff-log "$DIFFLOG" --originals "$TREE/klp-tmp/1-orig" | tee "$OUT/gate-a.txt"
 
 # GPL-2.0 §3: the module is a derived work of the kernel. Ship its complete
 # corresponding source: the patches, the exact kernel source (once per

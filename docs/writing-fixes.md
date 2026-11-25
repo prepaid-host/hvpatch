@@ -18,6 +18,18 @@ They are `needs-manual` in the catalog until someone does the work below.
 | A global initialised in `__init` code | callback that does the init at patch time |
 | Struct layout of existing objects, `__init` paths that already ran, assembler, vDSO, `notrace` code | not livepatchable: reboot |
 
+### Inline functions
+
+The kernel's `inline` implies `notrace`. When the compiler keeps an
+out-of-line copy of a `static inline` function, that copy has no ftrace
+location, and livepatch refuses to replace it ("failed to find location for
+function"). Gate A catches this at build time. Patch the callers instead: a
+per-series patch (`patches: {"7.0": 0001-fix.patch.70}`) that is the
+upstream fix plus `__always_inline` on the function moves the change into
+its callers, which are traceable. List the callers in `functions`, and
+explain the deviation in a comment in `meta.yaml`; the default patch stays
+the upstream one.
+
 ## Shadow variables
 
 A livepatch cannot add a field to objects that already exist. A shadow

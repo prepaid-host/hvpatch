@@ -6,6 +6,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- Gate A checks that every patched function has an ftrace location in the
+  original object (`--diff-log`, `--originals`). Out-of-line copies of
+  `inline` functions are `notrace` and failed only in the QEMU stage
+  before; `docs/writing-fixes.md` explains how to patch their callers.
+
 ## [0.4.0] - 2026-11-25
 
 Ready-made livepatches: the project now builds, tests and signs modules for

@@ -37,7 +37,8 @@ For each supported kernel release (`builder/run.sh <kver> <level>`):
 6. **Gate A** (`hvpatch-tool gate-a`) against the shipped artifacts:
    modinfo, modversion CRCs, every livepatch relocation symbol and patched
    function in the shipped System.map or module (a missing shipped module is
-   an error), and the changed functions equal the reviewed catalog lists.
+   an error), the changed functions equal the reviewed catalog lists, and
+   each has an ftrace location in the original object (not `inline`/`notrace`).
 7. **Source bundle** for the GPL: patches, kernel tarball, config,
    toolchain, scripts.
 8. **Sign** (`sign-module.sh`, separate container without tree, catalog or
