@@ -12,6 +12,10 @@ All notable changes to this project are documented here. The format follows
   original object (`--diff-log`, `--originals`). Out-of-line copies of
   `inline` functions are `notrace` and failed only in the QEMU stage
   before; `docs/writing-fixes.md` explains how to patch their callers.
+- `lint` rejects the draft placeholder `reviewed_by: ["pending-review"]`.
+  `--allow-pending-review` (set by `build.sh` when
+  `HVPATCH_ALLOW_PENDING_REVIEW=1`) turns it into a note for test builds of
+  draft branches.
 
 ## [0.4.0] - 2026-11-25
 

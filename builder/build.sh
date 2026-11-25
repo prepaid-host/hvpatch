@@ -56,7 +56,11 @@ REL=$(make -C "$TREE" -s kernelrelease)
 [ "$REL" = "$KVER" ] || die "tree builds $REL, expected $KVER"
 
 log "resolving catalog"
-hvpatch-tool lint --catalog "$CATALOG"
+# Test builds of draft branches set HVPATCH_ALLOW_PENDING_REVIEW=1; the
+# pipeline on main does not, so an unreviewed entry never ships.
+LINT_ARGS=()
+[ "${HVPATCH_ALLOW_PENDING_REVIEW:-0}" = 1 ] && LINT_ARGS+=(--allow-pending-review)
+hvpatch-tool lint --catalog "$CATALOG" "${LINT_ARGS[@]}"
 hvpatch-tool resolve --catalog "$CATALOG" --kernel "$KVER" --tree "$TREE" --out "$OUT/resolved.json"
 python3 -I -c 'import json,sys; print("\n".join(json.load(open(sys.argv[1]))["patches"]))' "$OUT/resolved.json" > "$OUT/patches.list"
 mapfile -t PATCHES < <(grep -v '^$' "$OUT/patches.list" || true)

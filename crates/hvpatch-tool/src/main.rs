@@ -72,6 +72,10 @@ enum Cmd {
         /// files, for the patch-id comparison.
         #[arg(long)]
         upstream: Option<PathBuf>,
+        /// Report `reviewed_by: ["pending-review"]` as a note instead of a
+        /// problem. For test builds of draft branches only.
+        #[arg(long)]
+        allow_pending_review: bool,
     },
     /// Resolve the catalog for one kernel: which patches go into the module.
     Resolve {
@@ -353,11 +357,18 @@ fn run(cli: Cli) -> Result<bool> {
             }
             Ok(r.ok)
         }
-        Cmd::Lint { catalog: dir, upstream } => {
+        Cmd::Lint { catalog: dir, upstream, allow_pending_review } => {
             let entries = catalog::load(&dir)?;
             let mut ok = true;
             for l in &entries {
                 let mut problems = catalog::lint(l);
+                if let Some(p) = catalog::pending_review(l) {
+                    if allow_pending_review {
+                        println!("{}: note: {p}", l.entry.id);
+                    } else {
+                        problems.push(p);
+                    }
+                }
                 if let Some(up) = &upstream
                     && let Some(p) = catalog::check_patch_id(l, up)?
                 {
