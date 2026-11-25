@@ -12,6 +12,11 @@ All notable changes to this project are documented here. The format follows
   original object (`--diff-log`, `--originals`). Out-of-line copies of
   `inline` functions are `notrace` and failed only in the QEMU stage
   before; `docs/writing-fixes.md` explains how to patch their callers.
+- Pull request test builds (`PR_TESTS=1`): when main has nothing to build,
+  the pipeline builds the oldest open catalog pull request from a branch of
+  the repository for each kernel, signs it with a throwaway key, runs the
+  QEMU stage and reports a commit status and a comment
+  (`builder/pr-list.sh`, `builder/github-report.sh`); nothing is published.
 - `lint` rejects the draft placeholder `reviewed_by: ["pending-review"]`.
   `--allow-pending-review` (set by `build.sh` when
   `HVPATCH_ALLOW_PENDING_REVIEW=1`) turns it into a note for test builds of

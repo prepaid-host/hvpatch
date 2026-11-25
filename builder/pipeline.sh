@@ -13,6 +13,14 @@
 #            promote and renew (rings.sh); only the manifest key and the
 #            upload key
 #
+# Pull request test builds (PR_TESTS=1): when main has nothing to build,
+# prepare takes the oldest open pull request that changes catalog/ and has a
+# kernel left to test (pr-list.sh, same-repository branches only), and the
+# stages build it like main, with three differences: lint lets
+# reviewed_by: ["pending-review"] pass, sign uses a throwaway key instead of
+# the module key, and publish uploads nothing but reports the result to the
+# pull request (github-report.sh). Markers live in STATE/pr.
+#
 # usage: pipeline.sh <stage>
 #
 # A failed stage records it and later stages skip; publish then marks the
@@ -47,6 +55,9 @@
 #   LOCK_DIR        directory for the run lock (default WORK/lock); not
 #                   mounted into the build container
 #   POD_NAME        owner of the run lock (default the host name)
+#   PR_TESTS        1: test-build pull requests when main is idle (default 0)
+#   GITHUB_REPO     owner/name for pull requests (default prepaid-host/hvpatch)
+#   GITHUB_TOKEN_FILE  token for commit statuses and comments (publish only)
 #   LOCK_STALE_MIN  age in minutes after which a lock is taken over (420)
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -86,7 +97,7 @@ release_on_error() {
 
 if [ "$STAGE" = prepare ]; then
   mkdir -p "$RUN" "$STATE"
-  rm -f "$TRUST/plan"
+  rm -f "$TRUST/plan" "$TRUST/pr"
   mkdir -p "$(dirname "$LOCK")"
   NOW=$(date +%s)
   if ! mkdir "$LOCK" 2>/dev/null; then
@@ -117,8 +128,45 @@ if [ "$STAGE" = prepare ]; then
   rsync_remote "${REPO_REMOTE:?REPO_REMOTE not set}" "$PUB/"
   CATALOG="$SRC/catalog" STATE="$STATE" "$HERE/plan.sh" "$PUB" > "$TRUST/plan"
   git -C "$SRC" rev-parse HEAD > "$TRUST/commit"
+  if [ ! -s "$TRUST/plan" ] && [ "${PR_TESTS:-0}" = 1 ]; then
+    MAIN=$(git -C "$SRC" rev-parse HEAD)
+    # Markers of finished pull request builds; publish creates the directory
+    # (STATE is read-only here).
+    PRSTATE=$STATE/pr
+    [ -d "$PRSTATE" ] || PRSTATE=$(mktemp -d)
+    PRS=$("$HERE/pr-list.sh") || { log "listing pull requests failed; no test builds this run"; PRS=; }
+    while read -r N SHA; do
+      [ -n "$N" ] || continue
+      "${G[@]}" -C "$SRC" fetch -q origin "+refs/pull/$N/head" || continue
+      # Moved since the listing: the next run sees the new head.
+      [ "$(git -C "$SRC" rev-parse FETCH_HEAD)" = "$SHA" ] || continue
+      # Only catalog changes: the builder itself comes from the image.
+      if git -C "$SRC" diff --quiet "$MAIN...$SHA" -- catalog; then continue; fi
+      "${G[@]}" -C "$SRC" -c advice.detachedHead=false checkout -q --force "$SHA"
+      "${G[@]}" -C "$SRC" clean -fdxq
+      CATALOG="$SRC/catalog" STATE="$PRSTATE" "$HERE/plan.sh" "$PUB" > "$TRUST/plan"
+      if [ -s "$TRUST/plan" ]; then
+        echo "$N $SHA" > "$TRUST/pr"
+        echo "$SHA" > "$TRUST/commit"
+        log "test build for pull request #$N at ${SHA:0:12}"
+        break
+      fi
+    done <<< "$PRS"
+    if [ ! -s "$TRUST/pr" ]; then
+      : > "$TRUST/plan"
+      "${G[@]}" -C "$SRC" -c advice.detachedHead=false checkout -q --force "$MAIN"
+      "${G[@]}" -C "$SRC" clean -fdxq
+    fi
+  fi
   if [ -s "$TRUST/plan" ]; then log "plan: $(cat "$TRUST/plan")"; else log "nothing to build"; fi
   exit 0
+fi
+
+# Pull request test build: "<number> <sha>", written by prepare.
+PR_NUM=; PR_SHA=
+if [ -s "$TRUST/pr" ]; then
+  read -r PR_NUM PR_SHA < "$TRUST/pr"
+  [[ $PR_NUM =~ ^[0-9]{1,7}$ && $PR_SHA =~ ^[0-9a-f]{40}$ ]] || die "unexpected $TRUST/pr"
 fi
 
 # Promotions and renewals (rings.sh) run in every publish, with or without
@@ -130,6 +178,19 @@ ring_maintenance() {
   "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}"
 }
 if [ "$STAGE" = publish ]; then trap release_lock EXIT; else trap release_on_error EXIT; fi
+if [ "$STAGE" = publish ] && [ -n "$PR_NUM" ]; then
+  # Nothing of a pull request build is uploaded or signed for real.
+  read -r KVER _ < "$TRUST/plan"
+  if [ -e "$RUN/failed" ]; then RESULT="failed:$(cat "$RUN/failed")"
+  elif [ -e "$RUN/none" ]; then RESULT=none
+  else RESULT=passed; fi
+  mkdir -p "$STATE/pr"
+  case $RESULT in failed:*) touch "$STATE/pr/$KVER@$PR_SHA.failed" ;; *) touch "$STATE/pr/$KVER@$PR_SHA.none" ;; esac
+  log "pull request #$PR_NUM, $KVER: $RESULT"
+  "$HERE/github-report.sh" "$PR_NUM" "$PR_SHA" "$KVER" "$RESULT" "$WORK/build/$KVER/out" \
+    || log "reporting to the pull request failed"
+  exit 0
+fi
 if [ "$STAGE" = publish ] && { [ ! -s "$TRUST/plan" ] || { [ -e "$RUN/none" ] && [ ! -e "$RUN/failed" ]; }; }; then
   if [ -s "$TRUST/plan" ]; then
     read -r KVER _ < "$TRUST/plan"
@@ -189,6 +250,8 @@ case "$STAGE" in
     ;;
   build)
     mkdir -p "$W/src" "$W/out" "$W/cache"
+    # A pull request may still carry the review placeholder (see lint).
+    if [ -n "$PR_NUM" ]; then export HVPATCH_ALLOW_PENDING_REVIEW=1; fi
     # build.sh exits 0 without a module when nothing applies to this kernel.
     ( cd "$SRC" && CATALOG="$SRC/catalog" AUTO_LOCK=1 "$HERE/build.sh" "$KVER" "$LEVEL" "$W" ) \
       || { echo build > "$RUN/failed"; log "build failed for $KVER level $LEVEL"; exit 0; }
@@ -200,6 +263,15 @@ case "$STAGE" in
   sign)
     [ -e "$RUN/none" ] && exit 0
     verify_shipped
+    if [ -n "$PR_NUM" ]; then
+      # Unreviewed code never gets the real module key: a throwaway key and
+      # certificate, gone with the container.
+      K=$(mktemp -d)
+      openssl req -new -x509 -nodes -batch -utf8 -sha256 -days 1 -newkey rsa:2048 \
+        -subj "/CN=hvpatch pull request test build (untrusted)" \
+        -keyout "$K/key.pem" -outform DER -out "$K/cert.der" 2>/dev/null
+      export MODULE_KEY=$K/key.pem MODULE_CERT=$K/cert.der
+    fi
     run_stage "$HERE/sign-module.sh" "$KVER" "$LEVEL" "$W"
     ;;
   test)

@@ -7,7 +7,7 @@ stages run as a Kubernetes CronJob. The project builds at
 
 ## What it does
 
-Every 30 minutes one pod runs these stages, each in its own container and
+Every few minutes (5 in the project's setup) one pod runs these stages, each in its own container and
 one after the other (`builder/pipeline.sh <stage>`):
 
 | Stage | Does | Gets |
@@ -50,6 +50,32 @@ also runs `builder/rings.sh`:
 Promotion goes by time only: the pipeline cannot tell whether canary nodes
 had problems. Watch the canary nodes (contrib/prometheus) and add a hold or
 revoke when they do. `PROMOTE=0` keeps everything in canary and only renews.
+
+## Pull request test builds
+
+With `PR_TESTS=1`, a run that finds nothing to build for main tests an
+open pull request instead: the oldest one that changes `catalog/`, comes
+from a branch of the repository itself (not a fork: the build stage runs
+its patches) and still has a kernel without a result for its head commit
+(`builder/pr-list.sh`). One kernel per run, as for main, which always
+comes first. The stages differ in three places:
+
+- lint lets `reviewed_by: ["pending-review"]` pass;
+- sign uses a throwaway key and certificate made in the container, never
+  the module key, so nothing of an unreviewed pull request is signed for
+  real;
+- publish uploads nothing and does no ring maintenance. It records the
+  result in `state/pr` (a new push gets new builds) and reports it
+  (`builder/github-report.sh`): a commit status `hvpatch/test-build <kernel>`
+  and, unless nothing in the catalog applies to the kernel, a comment with
+  Gate A, the patched functions and the QEMU result, or the end of the log
+  of the failed stage.
+
+Reporting needs a token in `GITHUB_TOKEN_FILE` (default `/gh/token`, mounted
+into the publish container only) with write access to commit statuses and
+pull requests of `GITHUB_REPO`; without one the result is only in the job
+log. A pull request test holds the lock like any run, so a merge to main
+waits for it to finish.
 
 ## Locking
 
