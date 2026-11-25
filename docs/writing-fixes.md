@@ -30,6 +30,20 @@ its callers, which are traceable. List the callers in `functions`, and
 explain the deviation in a comment in `meta.yaml`; the default patch stays
 the upstream one.
 
+### Static calls into modules
+
+A livepatch module cannot contain static call sites whose key lives in a
+module, for example `kvm_x86_call(...)` in `kvm.ko`: objtool stops with
+"unsupported static call key … Use KLP_STATIC_CALL() instead". Calls that
+come from inlined helpers (`kvm_register_read()`, `kvm_set_rflags()`, …)
+count too; `objdump -dr --disassemble=<function> <object>.o | grep __SCT__`
+lists them all. Rewriting them with `KLP_STATIC_CALL()` from
+`include/linux/livepatch_helpers.h` is manual work: it is an indirect call
+through the key's function pointer, so ops that may be NULL need a check.
+Until someone does it, such fixes are `needs-manual`. Static calls with
+vmlinux keys (`cond_resched`) and tracepoints are fine; klp-build disables
+tracepoints in the patched functions.
+
 ## Shadow variables
 
 A livepatch cannot add a field to objects that already exist. A shadow
