@@ -38,6 +38,8 @@
 #   SERIES, NEWEST  passed to plan.sh
 #   BUILDER_IMAGE   recorded in the source bundle
 #   TRUST           volume for the plan and checksums (default /trusted)
+#   LOCK_DIR        directory for the run lock (default WORK/lock); not
+#                   mounted into the build container
 #   POD_NAME        owner of the run lock (default the host name)
 #   LOCK_STALE_MIN  age in minutes after which a lock is taken over (420)
 set -euo pipefail
@@ -56,14 +58,18 @@ rsync_remote() {
 SSH_DIR=${SSH_DIR:-/ssh}
 
 # One run at a time: the volume is shared, and the CronJob's Forbid policy
-# does not cover jobs created by hand. prepare takes the lock in RUN; it is
-# released when publish ends or a stage fails. A lock older than
-# LOCK_STALE_MIN minutes (default 420, longer than the job deadline) is left
+# does not cover jobs created by hand. prepare takes the lock; it is released
+# when publish ends or a stage fails. LOCK_DIR must not be mounted into the
+# build container (it could otherwise hold the lock forever). The lock records
+# its owner and when it was taken; a lock older than LOCK_STALE_MIN minutes
+# (default 420, longer than the job deadline), or dated in the future, is left
 # over from a killed pod and is taken over.
 ME=${POD_NAME:-$(hostname)}
-LOCK=$RUN/lock
+LOCK=${LOCK_DIR:-$WORK/lock}/run
 release_lock() {
-  if [ "$(cat "$LOCK/owner" 2>/dev/null)" = "$ME" ]; then rm -rf "$LOCK"; fi
+  local owner _
+  read -r owner _ < "$LOCK/owner" 2>/dev/null || return 0
+  if [ "$owner" = "$ME" ]; then rm -rf "$LOCK"; fi
   return 0
 }
 release_on_error() {
@@ -75,16 +81,21 @@ release_on_error() {
 if [ "$STAGE" = prepare ]; then
   mkdir -p "$RUN" "$STATE"
   rm -f "$TRUST/plan"
+  mkdir -p "$(dirname "$LOCK")"
+  NOW=$(date +%s)
   if ! mkdir "$LOCK" 2>/dev/null; then
-    OWNER=$(cat "$LOCK/owner" 2>/dev/null || echo unknown)
-    if [ -z "$(find "$LOCK" -maxdepth 0 -mmin +"${LOCK_STALE_MIN:-420}")" ]; then
-      log "another run ($OWNER) is active; nothing to do"
+    OWNER=unknown; SINCE=0
+    read -r OWNER SINCE < "$LOCK/owner" 2>/dev/null || true
+    [[ "$SINCE" =~ ^[0-9]{1,12}$ ]] || SINCE=0
+    AGE=$(( (NOW - SINCE) / 60 ))
+    if [ "$AGE" -ge 0 ] && [ "$AGE" -lt "${LOCK_STALE_MIN:-420}" ]; then
+      log "another run (${OWNER//[^A-Za-z0-9._-]/?}, ${AGE} min) is active; nothing to do"
       exit 0
     fi
-    log "taking over the stale lock of $OWNER"
+    log "taking over the stale lock of ${OWNER//[^A-Za-z0-9._-]/?} (${AGE} min)"
     rm -rf "$LOCK"; mkdir "$LOCK"
   fi
-  echo "$ME" > "$LOCK/owner"
+  echo "$ME $NOW" > "$LOCK/owner"
   trap release_on_error EXIT
   rm -f "$RUN/failed" "$RUN/none"
   G=(git -c core.hooksPath=/dev/null -c core.fsmonitor=false)

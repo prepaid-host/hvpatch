@@ -30,8 +30,8 @@ catalog changes. Releases missing from `kernels.lock` are built with
 Only one run works on the volume at a time: `prepare` takes a lock that
 `publish` releases (or a failing stage). A run started by hand while another
 one is active does nothing. A lock older than `LOCK_STALE_MIN` minutes (420)
-comes from a killed pod and is taken over. The `run` directory of the volume
-holds the lock, so the publish container mounts it writable.
+comes from a killed pod and is taken over. The lock lives in `LOCK_DIR`,
+which the build container does not mount.
 
 ## Trust
 
