@@ -1,0 +1,10 @@
+# Promotion holds for the project repository (builder/rings.sh).
+#
+# One hold per line: <kernel|*> <level|*> <reason>
+# A held level stays in its ring: it is not promoted canary -> early ->
+# stable. "* * <reason>" stops all promotions. Add a hold by pull request
+# when a level misbehaves on canary nodes; revoke it (builder/revoke.sh) if
+# nodes must stop running it.
+#
+# Example:
+# 7.0.14-30-pve 2 high load average after the transition on one canary node

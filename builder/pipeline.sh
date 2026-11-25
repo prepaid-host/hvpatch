@@ -9,8 +9,9 @@
 #   build    klp-build, Gate A, source bundle (build.sh); no keys
 #   sign     module signature (sign-module.sh); only the module key
 #   test     QEMU stage (qemu-test.sh); no keys
-#   publish  sign the manifest and upload (publish.sh + rsync); only the
-#            manifest key and the upload key
+#   publish  sign the manifest and upload (publish.sh + rsync), then
+#            promote and renew (rings.sh); only the manifest key and the
+#            upload key
 #
 # usage: pipeline.sh <stage>
 #
@@ -38,6 +39,11 @@
 #   SERIES, NEWEST  passed to plan.sh
 #   BUILDER_IMAGE   recorded in the source bundle
 #   TRUST           volume for the plan and checksums (default /trusted)
+#   MANIFEST_PUB    public manifest key for rings.sh (default the checkout's
+#                   project-keys/manifest.pub)
+#   HOLDS           promotion holds (default the checkout's rings/holds)
+#   RING_MAINTENANCE, PROMOTE, PROMOTE_EARLY_DAYS, PROMOTE_STABLE_DAYS,
+#   RENEW_DAYS, VALID_DAYS   as in rings.sh
 #   LOCK_DIR        directory for the run lock (default WORK/lock); not
 #                   mounted into the build container
 #   POD_NAME        owner of the run lock (default the host name)
@@ -115,7 +121,24 @@ if [ "$STAGE" = prepare ]; then
   exit 0
 fi
 
+# Promotions and renewals (rings.sh) run in every publish, with or without
+# a build. PROMOTE=0 only renews; RING_MAINTENANCE=0 turns both off.
+ring_maintenance() {
+  [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
+  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "${HOLDS:-$SRC/rings/holds}"
+}
 if [ "$STAGE" = publish ]; then trap release_lock EXIT; else trap release_on_error EXIT; fi
+if [ "$STAGE" = publish ] && { [ ! -s "$TRUST/plan" ] || { [ -e "$RUN/none" ] && [ ! -e "$RUN/failed" ]; }; }; then
+  if [ -s "$TRUST/plan" ]; then
+    read -r KVER _ < "$TRUST/plan"
+    touch "$STATE/$KVER@$(cat "$TRUST/commit").none"
+  fi
+  [ "${RING_MAINTENANCE:-1}" = 1 ] || exit 0
+  rsync_remote "${REPO_REMOTE:?REPO_REMOTE not set}" "$PUB/"
+  rc=0; ring_maintenance || rc=$?
+  rsync_remote "$PUB/" "$REPO_REMOTE"
+  exit "$rc"
+fi
 [ -s "$TRUST/plan" ] || { log "$STAGE: nothing planned"; exit 0; }
 read -r KVER LEVEL PREV < "$TRUST/plan"
 W=$WORK/build/$KVER
@@ -180,21 +203,21 @@ case "$STAGE" in
     run_stage env CATALOG="$SRC/catalog" "$HERE/qemu-test.sh" "$KVER" "$W" ${P[@]+"${P[@]}"}
     ;;
   publish)
-    if [ -e "$RUN/none" ] && [ ! -e "$RUN/failed" ]; then
-      touch "$STATE/$KVER@$COMMIT.none"
-      exit 0
-    fi
+    # The published copy may be older than the remote if another publisher
+    # ran meanwhile: fetch again right before changing it.
+    rsync_remote "$REPO_REMOTE" "$PUB/"
     if [ -e "$RUN/failed" ]; then
       touch "$STATE/$KVER@$COMMIT.failed"
+      ring_maintenance || true
+      rsync_remote "$PUB/" "$REPO_REMOTE"
       die "$(cat "$RUN/failed") failed for $KVER level $LEVEL at $COMMIT; not retried until the catalog changes"
     fi
-    # The published copy may be older than the remote if another publisher
-    # ran meanwhile: fetch again right before publishing.
     verify_shipped
-    rsync_remote "$REPO_REMOTE" "$PUB/"
     "$HERE/publish.sh" "$W/out" "$PUB"
+    rc=0; ring_maintenance || rc=$?
     rsync_remote "$PUB/" "$REPO_REMOTE"
     log "published $KVER level $LEVEL"
+    exit "$rc"
     ;;
   *) die "unknown stage $STAGE" ;;
 esac

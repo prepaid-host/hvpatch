@@ -17,7 +17,7 @@ one after the other (`builder/pipeline.sh <stage>`):
 | `build` | klp-build, Gate A, source bundle (`build.sh`) | checkout read-only, **no keys** |
 | `sign` | checks the shipped artifacts, Gate A again, module signature | module key |
 | `test` | checks the shipped artifacts, QEMU stage (TCG if there is no `/dev/kvm`) | – |
-| `publish` | checks again, signs the manifest (`publish.sh`, ring canary), uploads | manifest key, upload key |
+| `publish` | checks again, signs the manifest (`publish.sh`, ring canary), promotes and renews (`rings.sh`), uploads | manifest key, upload key |
 
 `plan.sh` picks at most one kernel per run: the `NEWEST` releases of each
 series in `SERIES` (from the Proxmox repository via apt, so the package
@@ -26,6 +26,26 @@ published level was built from an older catalog. A kernel that failed, or
 had nothing to livepatch, at a catalog commit is not tried again until the
 catalog changes. Releases missing from `kernels.lock` are built with
 `AUTO_LOCK=1` from the commit that released them (logged).
+
+## Rings
+
+Fresh builds go to `canary`. Every run, with or without a build, `publish`
+also runs `builder/rings.sh`:
+
+- a level moves from canary to early after `PROMOTE_EARLY_DAYS` (3) and
+  from early to stable after `PROMOTE_STABLE_DAYS` (7) more, one ring per
+  run;
+- a level listed in `rings/holds` (by pull request) or revoked is not
+  promoted;
+- every ring manifest that expires within `RENEW_DAYS` (10) is re-signed
+  with a new expiry `VALID_DAYS` (30) from now, same level and build time.
+  Revoked levels are left to expire.
+
+Promotion goes by time only: the pipeline cannot tell whether canary nodes
+had problems. Watch the canary nodes (contrib/prometheus) and add a hold or
+revoke when they do. `PROMOTE=0` keeps everything in canary and only renews.
+
+## Locking
 
 Only one run works on the volume at a time: `prepare` takes a lock that
 `publish` releases (or a failing stage). A run started by hand while another
@@ -45,6 +65,10 @@ which the build container does not mount.
   for every node that trusts this key. Keep the key offline instead
   (`builder/run.sh` and `publish.sh` on a signing machine) if that is not
   acceptable, or trust such a key on canary nodes only.
+- The publish container also gets the repository checkout read-only, for
+  the public manifest key (`project-keys/manifest.pub`, which `rings.sh`
+  checks every manifest against before promoting or renewing it) and
+  `rings/holds`.
 - The pod has no service account token. The QEMU stage runs without network
   (`-nic none`).
 
