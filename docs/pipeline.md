@@ -54,7 +54,8 @@ revoke when they do. `PROMOTE=0` keeps everything in canary and only renews.
 ## Pull request test builds
 
 With `PR_TESTS=1`, a run that finds nothing to build for main tests an
-open pull request instead: the oldest one that changes `catalog/`, comes
+open pull request instead: the oldest one that changes `catalog/`, is
+ready for review (a draft only with the label `test-build`), comes
 from a branch of the repository itself (not a fork: the build stage runs
 its patches) and still has a kernel without a result for its head commit
 (`builder/pr-list.sh`). One kernel per run, as for main, which always

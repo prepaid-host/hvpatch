@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Open pull requests the pipeline may test-build: "<number> <head sha>" per
-# line, oldest first.
+# line, oldest first. Draft pull requests only with the label "test-build"
+# (drafts from the CVE watcher are not buildable until someone completes
+# them).
 #
 # usage: pr-list.sh
 #
@@ -24,6 +26,9 @@ repo = sys.argv[1]
 for p in json.load(sys.stdin):
     n, head = p.get("number"), p.get("head") or {}
     sha, hrepo = head.get("sha"), (head.get("repo") or {}).get("full_name")
+    labels = {l.get("name") for l in p.get("labels") or [] if isinstance(l, dict)}
+    if p.get("draft") is not False and "test-build" not in labels:
+        continue
     if type(n) is int and 0 < n < 10**7 and isinstance(sha, str) and re.fullmatch(r"[0-9a-f]{40}", sha) and hrepo == repo:
         print(n, sha)
 ' "$REPO"
