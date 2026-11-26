@@ -292,7 +292,7 @@ case "$STAGE" in
     # publish copies it to STATE/commits, which the watcher reads.
     rm -f "$W/commits.txt"
     if [ -z "$PR_NUM" ] && [ -d "$W/src/.git" ]; then
-      git -C "$W/src" log --format='%x00%H%n%B' HEAD > "$W/commits.txt.tmp" \
+      git -C "$W/src" log --format='%x00%H%n%B' HEAD | python3 -I "$HERE/commit-refs.py" > "$W/commits.txt.tmp" \
         && mv "$W/commits.txt.tmp" "$W/commits.txt"
     fi
     if ! compgen -G "$W/out/klp_*.ko" >/dev/null; then
