@@ -12,6 +12,9 @@ All notable changes to this project are documented here. The format follows
   original object (`--diff-log`, `--originals`). Out-of-line copies of
   `inline` functions are `notrace` and failed only in the QEMU stage
   before; `docs/writing-fixes.md` explains how to patch their callers.
+- The commit lists for `cve-scan --contained` are filtered to the lines
+  it reads (`builder/commit-refs.py`): same result, about 7 % of the size
+  and a fifth of the memory for a full kernel history.
 - CVE watcher (`builder/cve-watch.sh`, hourly CronJob): scans every served
   kernel against the catalog and opens a draft pull request per new CVE at
   P1 or above, with the mainline fix and a to-do list; the existing backlog
