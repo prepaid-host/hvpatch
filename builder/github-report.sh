@@ -25,6 +25,10 @@ TOKEN_FILE=${GITHUB_TOKEN_FILE:-/gh/token}
 [ -r "$TOKEN_FILE" ] || { log "no GitHub token ($TOKEN_FILE): result not reported"; exit 0; }
 require curl python3
 
+# The build container could have replaced a directory on the way with a
+# symlink (to the mounted keys, say): OUT must be its own canonical path.
+# The stages run one after the other, so nothing changes it meanwhile.
+{ [ -d "$OUT" ] && [ "$(readlink -f -- "$OUT")" = "$OUT" ]; } || die "$OUT is not a plain directory path"
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 # Regular files only (see lib.sh), at most the last 64 KiB.
