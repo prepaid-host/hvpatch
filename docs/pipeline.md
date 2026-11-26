@@ -72,6 +72,14 @@ comes first. The stages differ in three places:
   Gate A, the patched functions and the QEMU result, or the end of the log
   of the failed stage.
 
+A pull request build writes the kernel's directory under `build/` (tree,
+objects, the cached original build, source tarballs), which main builds
+reuse. So prepare marks the kernel tainted before anything of the pull
+request runs (`lock/tainted`, not mounted into the build container), and
+the next main run of that kernel removes the directory and starts from a
+fresh tree: a cold build, but nothing a pull request left behind ends up in
+a module signed with the module key.
+
 Reporting needs a token in `GITHUB_TOKEN_FILE` (default `/gh/token`, mounted
 into the publish container only) with write access to commit statuses and
 pull requests of `GITHUB_REPO`; without one the result is only in the job
@@ -88,10 +96,11 @@ a served kernel and is not in the catalog:
   `hvpatch-tool cve-scan` against main's catalog, with the kernel CNA's
   `vulns.git`, CISA KEV and FIRST EPSS;
 - 7.0 kernels need the commit list of their kernel tree (the Ubuntu base
-  backports fixes). The build stage writes it to `build/<kver>/commits.txt`,
-  which survives the eviction of the tree, and the watcher only reads that
-  file: it never runs git in a tree the build container could have
-  configured. A 7.0 kernel the pipeline has not built yet is skipped;
+  backports fixes). Main builds write it, publish keeps it in
+  `state/commits/<kver>.txt` (pull request builds never do), and the
+  watcher only reads that file: it never runs git in a tree the build
+  container could have configured. A 7.0 kernel without a list yet is
+  skipped;
 - a CVE at `MAX_PRIORITY` (P1) or above gets a branch `cve/<id>` with a
   draft `catalog/<id>/meta.yaml` and the mainline fix as `0001-fix.patch`,
   and a draft pull request with priority, CVSS, KEV, EPSS, the affected
