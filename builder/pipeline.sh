@@ -253,10 +253,11 @@ case "$STAGE" in
     # A pull request build ran since the last main build: start main from
     # scratch (fresh trees and original builds, no cached tarballs), for
     # every kernel, since its build container could write all of them.
-    if [ -z "$PR_NUM" ] && [ -e "$TAINTED/build" ]; then
+    # Any marker counts, whatever its name.
+    if [ -z "$PR_NUM" ] && [ -n "$(ls -A "$TAINTED" 2>/dev/null)" ]; then
       log "a pull request test build ran: removing all kernel build directories"
       find "$WORK/build" -mindepth 1 -maxdepth 1 -exec rm -rf --one-file-system {} +
-      rm -f "$TAINTED/build"
+      find "$TAINTED" -mindepth 1 -delete
     fi
     # Build cache (this stage has no keys; /work/build is written by earlier
     # builds): keep the newest KEEP_TREES kernel trees, always the planned one.
