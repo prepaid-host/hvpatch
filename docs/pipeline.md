@@ -106,8 +106,10 @@ a served kernel and is not in the catalog:
   draft `catalog/<id>/meta.yaml` and the mainline fix as `0001-fix.patch`,
   and a draft pull request with priority, CVSS, KEV, EPSS, the affected
   kernels and a to-do list. At most `MAX_NEW` (5) per run;
-- the first run records the existing backlog without pull requests, except
-  P0 (known exploited, or critical and reachable from a guest);
+- the first scan of a kernel (the first run, a new Proxmox release, a 7.0
+  kernel that just got its commit list) records that kernel's backlog
+  without pull requests, except P0 (known exploited, or critical and
+  reachable from a guest) and CVEs that kernels scanned before report too;
 - a CVE whose branch ever had a pull request is not proposed again: closing
   a draft drops it.
 
