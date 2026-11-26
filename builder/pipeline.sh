@@ -21,12 +21,13 @@
 # the module key, and publish uploads nothing but reports the result to the
 # pull request (github-report.sh). Markers live in STATE/pr.
 #
-# A pull request build writes the kernel's directory under WORK/build (tree,
-# objects, the cached original build, source tarballs), and main builds
-# would otherwise reuse all of it. prepare marks the kernel tainted (in
-# LOCK_DIR/tainted, which the build container does not mount), and the next
-# main run of that kernel starts from an empty directory. The commit list
-# for cve-watch.sh is only taken from main builds, into STATE/commits.
+# The build container of a pull request build can write all of WORK/build
+# (trees, objects, cached original builds, source tarballs of every kernel),
+# and main builds would otherwise reuse it. prepare marks WORK/build tainted
+# (LOCK_DIR/tainted, which the build container does not mount) before the
+# pull request runs, and the next main run removes every kernel directory.
+# The commit list for cve-watch.sh comes from main builds only, made fresh
+# each time and kept in STATE/commits.
 #
 # usage: pipeline.sh <stage>
 #
@@ -156,10 +157,9 @@ if [ "$STAGE" = prepare ]; then
       if [ -s "$TRUST/plan" ]; then
         echo "$N $SHA" > "$TRUST/pr"
         echo "$SHA" > "$TRUST/commit"
-        # Before anything of the pull request runs: main must not reuse what
-        # its build leaves in this kernel's directory.
-        read -r PK _ < "$TRUST/plan"
-        mkdir -p "$TAINTED"; touch "$TAINTED/$PK"
+        # Before anything of the pull request runs: main must not reuse
+        # anything its build container can write.
+        mkdir -p "$TAINTED"; touch "$TAINTED/build"
         log "test build for pull request #$N at ${SHA:0:12}"
         break
       fi
@@ -250,12 +250,13 @@ run_stage() {
 
 case "$STAGE" in
   fetch)
-    # A pull request build used this kernel's directory: start main from
-    # scratch (a fresh tree and original build, no cached tarballs).
-    if [ -z "$PR_NUM" ] && [ -e "$TAINTED/$KVER" ]; then
-      log "$KVER was used by a pull request test build: removing its build directory"
-      rm -rf --one-file-system "$W"
-      rm -f "$TAINTED/$KVER"
+    # A pull request build ran since the last main build: start main from
+    # scratch (fresh trees and original builds, no cached tarballs), for
+    # every kernel, since its build container could write all of them.
+    if [ -z "$PR_NUM" ] && [ -e "$TAINTED/build" ]; then
+      log "a pull request test build ran: removing all kernel build directories"
+      find "$WORK/build" -mindepth 1 -maxdepth 1 -exec rm -rf --one-file-system {} +
+      rm -f "$TAINTED/build"
     fi
     # Build cache (this stage has no keys; /work/build is written by earlier
     # builds): keep the newest KEEP_TREES kernel trees, always the planned one.
@@ -288,12 +289,10 @@ case "$STAGE" in
     # without changing the upstream version). Made here, where the tree's
     # git config is the build's own business, and only in main builds;
     # publish copies it to STATE/commits, which the watcher reads.
+    rm -f "$W/commits.txt"
     if [ -z "$PR_NUM" ] && [ -d "$W/src/.git" ]; then
-      H=$(git -C "$W/src" rev-parse HEAD)
-      if [ "$(cat "$W/commits.head" 2>/dev/null)" != "$H" ]; then
-        git -C "$W/src" log --format='%x00%H%n%B' "$H" > "$W/commits.txt.tmp" \
-          && mv "$W/commits.txt.tmp" "$W/commits.txt" && echo "$H" > "$W/commits.head"
-      fi
+      git -C "$W/src" log --format='%x00%H%n%B' HEAD > "$W/commits.txt.tmp" \
+        && mv "$W/commits.txt.tmp" "$W/commits.txt"
     fi
     if ! compgen -G "$W/out/klp_*.ko" >/dev/null; then
       touch "$RUN/none"
