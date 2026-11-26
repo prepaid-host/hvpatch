@@ -10,3 +10,4 @@
 /builder/hvpatch-tool
 /keys/
 /catalog-drafts/
+__pycache__/

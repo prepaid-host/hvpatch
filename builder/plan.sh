@@ -31,10 +31,7 @@ COMMIT=$(git -C "$CATALOG" rev-parse HEAD)
 # Collect first: leaving a `cmd | while` loop early would SIGPIPE the
 # producer, and pipefail turns that into a failure.
 KERNELS=()
-for s in $SERIES; do
-  mapfile -t -O "${#KERNELS[@]}" KERNELS < <(apt-cache search --names-only "^proxmox-kernel-${s//./\\.}\.[0-9]+-[0-9]+-pve-signed$" \
-    | sed -E 's/^proxmox-kernel-([^ ]+)-signed .*/\1/' | sort -V | tail -n "$NEWEST" | sort -rV)
-done
+mapfile -t KERNELS < <(SERIES=$SERIES NEWEST=$NEWEST served_kernels)
 for kver in ${KERNELS[@]+"${KERNELS[@]}"}; do
   [ -e "$STATE/$kver@$COMMIT.failed" ] && { log "$kver: failed at $COMMIT before, skipped"; continue; }
   [ -e "$STATE/$kver@$COMMIT.none" ] && continue

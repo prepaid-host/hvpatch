@@ -12,6 +12,10 @@ All notable changes to this project are documented here. The format follows
   original object (`--diff-log`, `--originals`). Out-of-line copies of
   `inline` functions are `notrace` and failed only in the QEMU stage
   before; `docs/writing-fixes.md` explains how to patch their callers.
+- CVE watcher (`builder/cve-watch.sh`, hourly CronJob): scans every served
+  kernel against the catalog and opens a draft pull request per new CVE at
+  P1 or above, with the mainline fix and a to-do list; the existing backlog
+  only for P0.
 - Pull request test builds (`PR_TESTS=1`): when main has nothing to build,
   the pipeline builds the oldest open catalog pull request from a branch of
   the repository for each kernel, signs it with a throwaway key, runs the

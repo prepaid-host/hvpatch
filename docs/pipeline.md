@@ -72,11 +72,53 @@ comes first. The stages differ in three places:
   Gate A, the patched functions and the QEMU result, or the end of the log
   of the failed stage.
 
+The build container of a pull request build can write all of `build/`
+(trees, objects, cached original builds and source tarballs of every
+kernel), which main builds reuse. So prepare marks `build/` tainted before
+anything of the pull request runs (`lock/tainted`, not mounted into the
+build container), and the next main run removes every kernel directory:
+the main builds after a pull request test are cold builds, but nothing a
+pull request left behind ends up in a module signed with the module key.
+A separate volume for pull request builds would avoid the cold builds.
+
 Reporting needs a token in `GITHUB_TOKEN_FILE` (default `/gh/token`, mounted
 into the publish container only) with write access to commit statuses and
 pull requests of `GITHUB_REPO`; without one the result is only in the job
 log. A pull request test holds the lock like any run, so a merge to main
 waits for it to finish.
+
+## CVE watcher
+
+`builder/cve-watch.sh` runs as a second CronJob (hourly in the project's
+setup) and opens a draft pull request for every new kernel CVE that affects
+a served kernel and is not in the catalog:
+
+- it scans each served kernel (`SERIES`, `NEWEST`, as the pipeline) with
+  `hvpatch-tool cve-scan` against main's catalog, with the kernel CNA's
+  `vulns.git`, CISA KEV and FIRST EPSS;
+- 7.0 kernels need the commit list of their kernel tree (the Ubuntu base
+  backports fixes). Main builds write it fresh each time, publish keeps it in
+  `state/commits/<kver>.txt` (pull request builds never do), and the
+  watcher only reads that file: it never runs git in a tree the build
+  container could have configured. A 7.0 kernel without a list yet is
+  skipped;
+- a CVE at `MAX_PRIORITY` (P1) or above gets a branch `cve/<id>` with a
+  draft `catalog/<id>/meta.yaml` and the mainline fix as `0001-fix.patch`,
+  and a draft pull request with priority, CVSS, KEV, EPSS, the affected
+  kernels and a to-do list. At most `MAX_NEW` (5) per run;
+- the first run records the existing backlog without pull requests, except
+  P0 (known exploited, or critical and reachable from a guest);
+- a CVE whose branch ever had a pull request is not proposed again: closing
+  a draft drops it.
+
+Drafts are `needs-manual` and not built. Someone decides the class, puts in
+the backport the served kernels need and the functions, sets
+`reviewed_by: ["pending-review"]` and marks the pull request ready for
+review; the pipeline then test-builds it (see above) before the review.
+
+The watcher needs a token with contents and pull request write access
+(`GITHUB_TOKEN_FILE`); without one it only logs what it would open. It
+parses untrusted feeds, so it gets no signing or upload key.
 
 ## Locking
 

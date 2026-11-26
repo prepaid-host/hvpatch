@@ -21,6 +21,14 @@
 # the module key, and publish uploads nothing but reports the result to the
 # pull request (github-report.sh). Markers live in STATE/pr.
 #
+# The build container of a pull request build can write all of WORK/build
+# (trees, objects, cached original builds, source tarballs of every kernel),
+# and main builds would otherwise reuse it. prepare marks WORK/build tainted
+# (LOCK_DIR/tainted, which the build container does not mount) before the
+# pull request runs, and the next main run removes every kernel directory.
+# The commit list for cve-watch.sh comes from main builds only, made fresh
+# each time and kept in STATE/commits.
+#
 # usage: pipeline.sh <stage>
 #
 # A failed stage records it and later stages skip; publish then marks the
@@ -83,6 +91,7 @@ SSH_DIR=${SSH_DIR:-/ssh}
 # over from a killed pod and is taken over.
 ME=${POD_NAME:-$(hostname)}
 LOCK=${LOCK_DIR:-$WORK/lock}/run
+TAINTED=${LOCK_DIR:-$WORK/lock}/tainted
 release_lock() {
   local owner _
   read -r owner _ < "$LOCK/owner" 2>/dev/null || return 0
@@ -148,6 +157,9 @@ if [ "$STAGE" = prepare ]; then
       if [ -s "$TRUST/plan" ]; then
         echo "$N $SHA" > "$TRUST/pr"
         echo "$SHA" > "$TRUST/commit"
+        # Before anything of the pull request runs: main must not reuse
+        # anything its build container can write.
+        mkdir -p "$TAINTED"; touch "$TAINTED/build"
         log "test build for pull request #$N at ${SHA:0:12}"
         break
       fi
@@ -173,6 +185,15 @@ fi
 # a build. PROMOTE=0 only renews; RING_MAINTENANCE=0 turns both off. Their
 # state (STATE/rings) guards against rollbacks on the web server: STATE must
 # not be mounted into the build container, like TRUST and LOCK_DIR.
+# The commit list of a main build, for cve-watch.sh (see the build stage).
+keep_commits() {
+  local c="$WORK/build/$1/commits.txt"
+  if [ -f "$c" ] && [ ! -L "$c" ]; then
+    mkdir -p "$STATE/commits"
+    cp -- "$c" "$STATE/commits/$1.txt.tmp" && mv "$STATE/commits/$1.txt.tmp" "$STATE/commits/$1.txt"
+  fi
+  return 0
+}
 ring_maintenance() {
   [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
   "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}"
@@ -195,6 +216,7 @@ if [ "$STAGE" = publish ] && { [ ! -s "$TRUST/plan" ] || { [ -e "$RUN/none" ] &&
   if [ -s "$TRUST/plan" ]; then
     read -r KVER _ < "$TRUST/plan"
     touch "$STATE/$KVER@$(cat "$TRUST/commit").none"
+    keep_commits "$KVER"
   fi
   [ "${RING_MAINTENANCE:-1}" = 1 ] || exit 0
   rsync_remote "${REPO_REMOTE:?REPO_REMOTE not set}" "$PUB/"
@@ -228,6 +250,15 @@ run_stage() {
 
 case "$STAGE" in
   fetch)
+    # A pull request build ran since the last main build: start main from
+    # scratch (fresh trees and original builds, no cached tarballs), for
+    # every kernel, since its build container could write all of them.
+    # Any marker counts, whatever its name.
+    if [ -z "$PR_NUM" ] && [ -n "$(ls -A "$TAINTED" 2>/dev/null)" ]; then
+      log "a pull request test build ran: removing all kernel build directories"
+      find "$WORK/build" -mindepth 1 -maxdepth 1 -exec rm -rf --one-file-system {} +
+      find "$TAINTED" -mindepth 1 -delete
+    fi
     # Build cache (this stage has no keys; /work/build is written by earlier
     # builds): keep the newest KEEP_TREES kernel trees, always the planned one.
     mkdir -p "$W"; touch "$W"
@@ -255,6 +286,15 @@ case "$STAGE" in
     # build.sh exits 0 without a module when nothing applies to this kernel.
     ( cd "$SRC" && CATALOG="$SRC/catalog" AUTO_LOCK=1 "$HERE/build.sh" "$KVER" "$LEVEL" "$W" ) \
       || { echo build > "$RUN/failed"; log "build failed for $KVER level $LEVEL"; exit 0; }
+    # Commit list of the kernel tree for cve-watch.sh (7.0 backports fixes
+    # without changing the upstream version). Made here, where the tree's
+    # git config is the build's own business, and only in main builds;
+    # publish copies it to STATE/commits, which the watcher reads.
+    rm -f "$W/commits.txt"
+    if [ -z "$PR_NUM" ] && [ -d "$W/src/.git" ]; then
+      git -C "$W/src" log --format='%x00%H%n%B' HEAD > "$W/commits.txt.tmp" \
+        && mv "$W/commits.txt.tmp" "$W/commits.txt"
+    fi
     if ! compgen -G "$W/out/klp_*.ko" >/dev/null; then
       touch "$RUN/none"
       log "nothing to livepatch for $KVER at $COMMIT"
@@ -292,6 +332,7 @@ case "$STAGE" in
       die "$(cat "$RUN/failed") failed for $KVER level $LEVEL at $COMMIT; not retried until the catalog changes"
     fi
     verify_shipped
+    keep_commits "$KVER"
     "$HERE/publish.sh" "$W/out" "$PUB"
     rc=0; ring_maintenance || rc=$?
     rsync_remote "$PUB/" "$REPO_REMOTE"

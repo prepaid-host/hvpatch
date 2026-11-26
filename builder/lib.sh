@@ -26,6 +26,17 @@ regular() {
   done
 }
 
+# Kernels the pipeline serves, newest first per series: the NEWEST (default
+# 2) releases of each series in SERIES (default "7.0 7.3") that the Proxmox
+# repository has (apt-cache; run apt-get update first).
+served_kernels() {
+  local s
+  for s in ${SERIES:-7.0 7.3}; do
+    apt-cache search --names-only "^proxmox-kernel-${s//./\\.}\.[0-9]+-[0-9]+-pve-signed$" \
+      | sed -E 's/^proxmox-kernel-([^ ]+)-signed .*/\1/' | sort -V | tail -n "${NEWEST:-2}" | sort -rV
+  done
+}
+
 # Level of the manifest a ring currently points to (0 if none).
 ring_level() {
   local m="$1/v1/$2/$3/manifest.json"
