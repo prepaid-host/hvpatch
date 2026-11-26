@@ -255,6 +255,17 @@ case "$STAGE" in
     # build.sh exits 0 without a module when nothing applies to this kernel.
     ( cd "$SRC" && CATALOG="$SRC/catalog" AUTO_LOCK=1 "$HERE/build.sh" "$KVER" "$LEVEL" "$W" ) \
       || { echo build > "$RUN/failed"; log "build failed for $KVER level $LEVEL"; exit 0; }
+    # Commit list of the kernel tree for cve-watch.sh (7.0 backports fixes
+    # without changing the upstream version). Made here, where the tree's
+    # git config is the build's own business, and kept when the tree is
+    # evicted; the watcher reads it as plain data.
+    if [ -d "$W/src/.git" ]; then
+      H=$(git -C "$W/src" rev-parse HEAD)
+      if [ "$(cat "$W/commits.head" 2>/dev/null)" != "$H" ]; then
+        git -C "$W/src" log --format='%x00%H%n%B' "$H" > "$W/commits.txt.tmp" \
+          && mv "$W/commits.txt.tmp" "$W/commits.txt" && echo "$H" > "$W/commits.head"
+      fi
+    fi
     if ! compgen -G "$W/out/klp_*.ko" >/dev/null; then
       touch "$RUN/none"
       log "nothing to livepatch for $KVER at $COMMIT"

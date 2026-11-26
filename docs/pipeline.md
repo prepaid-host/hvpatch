@@ -88,9 +88,10 @@ a served kernel and is not in the catalog:
   `hvpatch-tool cve-scan` against main's catalog, with the kernel CNA's
   `vulns.git`, CISA KEV and FIRST EPSS;
 - 7.0 kernels need the commit list of their kernel tree (the Ubuntu base
-  backports fixes): the watcher reads the pipeline's trees read-only and
-  keeps the list when a tree is evicted; a 7.0 kernel the pipeline has not
-  built yet is skipped;
+  backports fixes). The build stage writes it to `build/<kver>/commits.txt`,
+  which survives the eviction of the tree, and the watcher only reads that
+  file: it never runs git in a tree the build container could have
+  configured. A 7.0 kernel the pipeline has not built yet is skipped;
 - a CVE at `MAX_PRIORITY` (P1) or above gets a branch `cve/<id>` with a
   draft `catalog/<id>/meta.yaml` and the mainline fix as `0001-fix.patch`,
   and a draft pull request with priority, CVSS, KEV, EPSS, the affected
