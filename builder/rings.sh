@@ -21,6 +21,12 @@
 #   - v1/revoked.json must verify too, and its sequence must not go back or
 #     the file vanish; otherwise nothing is promoted or renewed
 #
+# Renewal also covers v1/revoked.json (if there is one): it is re-issued
+# (same entries, sequence + 1, new issued time) once it is
+# REVOCATIONS_REISSUE_DAYS (default 3) old. Agents refuse to load anything
+# new when the list they have is older than revocation_max_age_days
+# (default 14). Runs with PROMOTE=0 too.
+#
 # Nothing is promoted that is revoked or held. The holds file lists
 # "<kernel|*> <level|*> <reason>" per line (# starts a comment); "* * <reason>"
 # stops all promotions. Revoked levels are not renewed either.
@@ -37,7 +43,8 @@ PUB=${2:?pubkey}; STATE=${3:?state dir}; HOLDS=${4:-}
 require hvpatch-tool python3 date
 EARLY_DAYS=${PROMOTE_EARLY_DAYS:-3}; STABLE_DAYS=${PROMOTE_STABLE_DAYS:-7}
 RENEW_DAYS=${RENEW_DAYS:-10}; VALID_DAYS=${VALID_DAYS:-30}
-for n in "$EARLY_DAYS" "$STABLE_DAYS" "$RENEW_DAYS" "$VALID_DAYS"; do
+REISSUE_DAYS=${REVOCATIONS_REISSUE_DAYS:-3}
+for n in "$EARLY_DAYS" "$STABLE_DAYS" "$RENEW_DAYS" "$VALID_DAYS" "$REISSUE_DAYS"; do
   [[ "$n" =~ ^[0-9]{1,3}$ ]] || die "day counts must be small integers"
 done
 [ -z "$HOLDS" ] || [ -f "$HOLDS" ] || die "holds file $HOLDS not found"
@@ -71,6 +78,19 @@ if [ -f "$LIST" ]; then
   [[ "$SEQ" =~ ^[0-9]{1,12}$ ]] || die "v1/revoked.json: bad sequence"
   [ "$SEQ" -ge "$SEQ_SEEN" ] || die "v1/revoked.json went back from sequence $SEQ_SEEN to $SEQ; not promoting or renewing anything"
   echo "$SEQ" > "$SEQ_FILE"
+  # Agents refuse new loads when the list is older than their
+  # revocation_max_age_days (default 14), so it is re-issued before that.
+  ISSUED=$(date -u -d "$(field "$LIST" issued)" +%s) || die "v1/revoked.json: bad issued"
+  if [ $(( NOW - ISSUED )) -ge $(( REISSUE_DAYS * 86400 )) ]; then
+    cp "$LIST" "$TMP/revoked.json"
+    if hvpatch-tool reissue-revocations --list "$TMP/revoked.json" >/dev/null \
+      && publish_revocations "$TMP/revoked.json" "$LIST"; then
+      echo "$REVOCATIONS_SEQUENCE" > "$SEQ_FILE"
+      log "re-issued v1/revoked.json (sequence $REVOCATIONS_SEQUENCE)"
+    else
+      log "re-issuing v1/revoked.json failed; agents stop loading when it gets too old"; BAD=1
+    fi
+  fi
 elif [ "$SEQ_SEEN" -gt 0 ]; then
   die "v1/revoked.json is gone (sequence $SEQ_SEEN was published); not promoting or renewing anything"
 fi

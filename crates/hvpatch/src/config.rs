@@ -53,6 +53,10 @@ pub struct Config {
     pub delay_hours: u64,
     /// The timer never goes beyond this level (an explicit `apply` can).
     pub pin_level: Option<u32>,
+    /// Refuse to load anything new when the accepted revocation list was
+    /// issued more than this many days ago (a mirror may be withholding a
+    /// newer one). The publisher re-issues the list regularly. 0 disables.
+    pub revocation_max_age_days: u32,
     /// Refuse to load when kprobes or BPF programs are attached to a
     /// function the patch replaces (otherwise only warn).
     pub refuse_on_trace_conflict: bool,
@@ -82,6 +86,7 @@ impl Default for Config {
             cluster_lock_dir: "/etc/pve/priv/lock".into(),
             delay_hours: 0,
             pin_level: None,
+            revocation_max_age_days: 14,
             refuse_on_trace_conflict: false,
             run_dir: "/run/hvpatch".into(),
         }

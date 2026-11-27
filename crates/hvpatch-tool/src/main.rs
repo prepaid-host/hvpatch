@@ -261,6 +261,14 @@ enum Cmd {
         #[arg(long)]
         reason: String,
     },
+    /// Publish the revocation list again with sequence + 1 and the current
+    /// time (same entries). Agents refuse new loads when the list is older
+    /// than `revocation_max_age_days`. Sign the result with `sign`.
+    ReissueRevocations {
+        /// revoked.json to update in place; it must exist.
+        #[arg(long)]
+        list: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -627,6 +635,15 @@ fn run(cli: Cli) -> Result<bool> {
             l.validate()?;
             write(&list, l.to_json_pretty().as_bytes())?;
             println!("revoked {sha} ({expected}); list sequence {}", l.sequence);
+            Ok(true)
+        }
+        Cmd::ReissueRevocations { list } => {
+            let mut l =
+                RevocationList::from_json(&read(&list)?).with_context(|| format!("reading {}", list.display()))?;
+            l.reissue(Utc::now());
+            l.validate()?;
+            write(&list, l.to_json_pretty().as_bytes())?;
+            println!("{}", l.sequence);
             Ok(true)
         }
     }

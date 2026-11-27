@@ -52,6 +52,11 @@ ring = "stable"
 # The timer never goes beyond this level; an explicit `apply` can.
 # pin_level = 3
 
+# Load nothing new when the revocation list was issued more than this many
+# days ago: a mirror may be hiding a newer list. Running patches stay. The
+# publisher re-issues the list regularly (builder/rings.sh). 0 disables.
+# revocation_max_age_days = 14
+
 # Refuse to load when kprobes or BPF programs are attached to a function the
 # livepatch replaces. Default: load and warn.
 # refuse_on_trace_conflict = false

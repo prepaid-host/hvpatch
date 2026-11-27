@@ -1042,6 +1042,44 @@ fn revocation_list_replay_and_bad_signature() {
     assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("revocation list")));
 }
 
+/// Accept list 1 at `now()`, load level 1, then let `days` pass on the
+/// agent's clock while the mirror keeps serving list 1. Level 2 is published.
+fn stale_list_agent(env: &Env, days: i64) -> Agent<FakeKernel> {
+    env.publish_level(1);
+    env.publish_revocations(&revocations(&[], 1));
+    let mut a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    assert_eq!(env.state().revocation_sequence, 1);
+    env.publish_level(2);
+    a.now = Box::new(move || now() + chrono::Duration::days(days));
+    a
+}
+
+#[test]
+fn old_revocation_list_blocks_new_loads() {
+    // The mirror hides list 2, which revokes level 2: list 1 is 20 days old.
+    let env = Env::new();
+    let a = stale_list_agent(&env, 20);
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
+    assert!(a.log_lines().iter().any(|l| l.contains("withholding")));
+}
+
+#[test]
+fn recent_revocation_list_allows_new_loads() {
+    let env = Env::new();
+    let a = stale_list_agent(&env, 1);
+    assert!(matches!(a.apply(&explicit()).unwrap(), Outcome::Applied { level: 2, .. }));
+}
+
+#[test]
+fn revocation_max_age_zero_disables_the_check() {
+    let mut env = Env::new();
+    env.cfg.revocation_max_age_days = 0;
+    let a = stale_list_agent(&env, 20);
+    assert!(matches!(a.apply(&explicit()).unwrap(), Outcome::Applied { level: 2, .. }));
+}
+
 // --- States ----------------------------------------------------------------
 
 #[test]

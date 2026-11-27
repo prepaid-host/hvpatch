@@ -76,6 +76,30 @@ publish_ring() {
   log "published $kver level $level to ring $ring ($target)"
 }
 
+# Sign a revocation list (<new-list>, already updated) and publish it as
+# <list>. Prints the sequence. Signing: MINISIGN_KEY or MANIFEST_KEY, as above.
+publish_revocations() {
+  local new="$1" list="$2" seq
+  seq=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["sequence"])' "$new") || return 1
+  # Explicit returns: callers may run this in an `if`, where set -e is off,
+  # and a list must never be published without its new signature.
+  if [ -n "${MINISIGN_KEY:-}" ]; then
+    minisign -S -s "$MINISIGN_KEY" -m "$new" -t "revocations sequence:$seq" || return 1
+  elif [ -n "${MANIFEST_KEY:-}" ]; then
+    hvpatch-tool sign --key "$MANIFEST_KEY" \
+      --trusted-comment "revocations sequence:$seq" "$new" || return 1
+  else
+    log "MANIFEST_KEY or MINISIGN_KEY not set"; return 1
+  fi
+  # Both copies are staged before either is moved, so that a full disk
+  # cannot leave a new signature next to the old list. Signature first,
+  # then the list: agents fetch the list first and retry once on a mismatch.
+  cp "$new.minisig" "$list.minisig.tmp" && cp "$new" "$list.tmp" || return 1
+  mv "$list.minisig.tmp" "$list.minisig" && mv "$list.tmp" "$list" || return 1
+  # shellcheck disable=SC2034 # read by the caller
+  REVOCATIONS_SEQUENCE=$seq
+}
+
 # Copy a file into the repository, never replacing different content.
 publish_file() {
   local src="$1" dst="$2"

@@ -81,6 +81,14 @@ impl RevocationList {
         self.issued = now;
     }
 
+    /// Publish the same entries again with a new sequence and issue time,
+    /// so that agents can tell the list is current (they refuse new loads
+    /// when `issued` is too old).
+    pub fn reissue(&mut self, now: DateTime<Utc>) {
+        self.sequence += 1;
+        self.issued = now;
+    }
+
     pub fn to_json_pretty(&self) -> String {
         let mut s = serde_json::to_string_pretty(self).expect("revocation list serializes");
         s.push('\n');
@@ -114,6 +122,17 @@ mod tests {
         let back = RevocationList::from_json(l.to_json_pretty().as_bytes()).unwrap();
         assert_eq!(back, l);
         assert!(back.find(&"b".repeat(64)).is_some());
+    }
+
+    #[test]
+    fn reissue_bumps_sequence_and_time_only() {
+        let mut l = RevocationList::default();
+        l.revoke(entry('a', 1), "2026-01-01T00:00:00Z".parse().unwrap());
+        let before = l.revoked.clone();
+        let now = "2026-02-01T00:00:00Z".parse().unwrap();
+        l.reissue(now);
+        assert_eq!((l.sequence, l.issued, &l.revoked), (2, now, &before));
+        l.validate().unwrap();
     }
 
     #[test]
