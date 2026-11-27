@@ -1,5 +1,28 @@
 # Publishing the agent as an APT repository
 
+## The project's repository
+
+The agent package of every release is published at
+<https://mirror.prepaid-host.io/hvpatch/apt>:
+
+```
+curl -fsSL https://mirror.prepaid-host.io/hvpatch/apt/hvpatch-archive.asc \
+  -o /usr/share/keyrings/hvpatch-archive.asc
+echo "deb [signed-by=/usr/share/keyrings/hvpatch-archive.asc] https://mirror.prepaid-host.io/hvpatch/apt trixie main" \
+  > /etc/apt/sources.list.d/hvpatch.list
+apt update && apt install hvpatch
+```
+
+Compare the key with `project-keys/apt-archive.asc` in this repository
+(`gpg --show-keys`). The pipeline keeps the repository with
+`builder/apt-repo.sh` on every run: when a new release is out, it downloads
+the package, checks it against the release's `SHA256SUMS`, verifies the
+release's signed build provenance with cosign (signer: the release workflow
+at exactly that tag, subject: exactly these bytes), and signs a new index
+with the archive key (`APT_KEY`). The key only exists in the publish container.
+
+The rest of this page describes how to run such a repository yourself.
+
 Goal: on a Proxmox VE node,
 
 ```
