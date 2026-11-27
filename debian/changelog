@@ -1,3 +1,11 @@
+hvpatch (0.4.1-1) trixie; urgency=medium
+
+  * Package upgrades no longer start hvpatch-boot.service.
+  * Fixes for restore, cache pruning, trace conflicts, the cluster lock
+    and revocation list freshness; CVE watcher for the project builds.
+
+ -- Christopher Sakel <christopher.sakel@icloud.com>  Fri, 27 Nov 2026 22:00:00 +0000
+
 hvpatch (0.4.0-1) trixie; urgency=medium
 
   * Project builds for the current Proxmox VE 9 kernels at
