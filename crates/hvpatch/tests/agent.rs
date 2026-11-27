@@ -892,6 +892,23 @@ fn trace_conflicts_warn_or_refuse() {
 }
 
 #[test]
+fn trace_conflict_is_found_for_a_function_with_compiler_suffix() {
+    let env = Env::new();
+    let mut m = env.manifest(1);
+    m.fixes[0].functions = vec!["vmlinux:tcp_foo.isra.0".into()];
+    let ko = ko(&m.module_name, KVER, true);
+    env.publish(m, &ko);
+    // traced_functions() cuts the kernel's name at the first dot.
+    let traced =
+        hvpatch::kernel::parse_enabled_functions("tcp_foo.isra.0 (1) R I tramp: 0x1 (bpf_trampoline_1+0x0/0x60)\n");
+    let k = kernel();
+    k.st.borrow_mut().traced = traced;
+    let mut a = env.agent(k);
+    a.cfg.refuse_on_trace_conflict = true;
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Precondition(ref s)) if s.contains("tcp_foo")));
+}
+
+#[test]
 fn effective_version_for_scanners() {
     let env = Env::new();
     env.publish_level(1);
