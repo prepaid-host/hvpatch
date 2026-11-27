@@ -159,10 +159,11 @@ pub fn parse_enabled_functions(text: &str) -> Vec<String> {
 }
 
 /// Parse `/sys/kernel/debug/kprobes/list`: "addr  k  function+offset ...".
+/// Cuts the compiler suffix (`.isra.0`) like `parse_enabled_functions`.
 pub fn parse_kprobes_list(text: &str) -> Vec<String> {
     text.lines()
         .filter_map(|l| l.split_whitespace().nth(2))
-        .map(|f| f.split('+').next().unwrap_or(f).to_owned())
+        .map(|f| f.split(['+', '.']).next().unwrap_or(f).to_owned())
         .collect()
 }
 
@@ -290,9 +291,9 @@ mod tests {
                   gup_fast_fallback (1)  R I  tramp: 0xffffffffc0300000 (klp_ftrace_handler+0x0/0x1d0) ->klp_ftrace_handler\n\
                   ovl_fileattr_set.cold (1)\n";
         assert_eq!(parse_enabled_functions(ef), vec!["tcp_v4_rcv", "ovl_fileattr_set"]);
-        let kp =
-            "ffffffff8143a2c0  k  do_sys_openat2+0x0    [FTRACE]\nffffffff81a00000  r  tcp_sendmsg+0x0    [FTRACE]\n";
-        assert_eq!(parse_kprobes_list(kp), vec!["do_sys_openat2", "tcp_sendmsg"]);
+        let kp = "ffffffff8143a2c0  k  do_sys_openat2+0x0    [FTRACE]\nffffffff81a00000  r  tcp_sendmsg+0x0    [FTRACE]\n\
+             ffffffff81a00100  k  tcp_foo.isra.0+0x4    [FTRACE]\n";
+        assert_eq!(parse_kprobes_list(kp), vec!["do_sys_openat2", "tcp_sendmsg", "tcp_foo"]);
     }
 
     #[test]

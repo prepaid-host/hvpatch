@@ -622,7 +622,12 @@ impl<K: KernelOps> Agent<K> {
             .fixes
             .iter()
             .flat_map(|f| f.functions.iter())
-            .map(|f| strip_sympos(f.split_once(':').map(|(_, n)| n).unwrap_or(f)).to_owned())
+            // Like parse_enabled_functions: cut the compiler suffix (`.isra.0`).
+            // shortcut: clones (`foo`, `foo.cold`) match as one symbol, so a conflict can be a false positive; match full names if that hurts.
+            .map(|f| {
+                let n = strip_sympos(f.split_once(':').map(|(_, n)| n).unwrap_or(f));
+                n.split_once('.').map(|(a, _)| a).unwrap_or(n).to_owned()
+            })
             .filter(|f| traced.iter().any(|t| t == f))
             .collect();
         out.sort();
