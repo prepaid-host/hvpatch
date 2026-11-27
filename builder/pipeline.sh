@@ -59,7 +59,9 @@
 #                   project-keys/manifest.pub)
 #   HOLDS           promotion holds (default the checkout's rings/holds)
 #   RING_MAINTENANCE, PROMOTE, PROMOTE_EARLY_DAYS, PROMOTE_STABLE_DAYS,
-#   RENEW_DAYS, VALID_DAYS   as in rings.sh
+#   RENEW_DAYS, VALID_DAYS, REVOCATIONS_REISSUE_DAYS   as in rings.sh
+#                   (RING_MAINTENANCE=0 also stops the revocation list
+#                   re-issue; agents then stop loading after 14 days)
 #   LOCK_DIR        directory for the run lock (default WORK/lock); not
 #                   mounted into the build container
 #   POD_NAME        owner of the run lock (default the host name)

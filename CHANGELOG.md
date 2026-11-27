@@ -6,6 +6,21 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+**UPGRADE NOTE:** update the publishing pipeline (`rings.sh` re-issues
+`v1/revoked.json`) before or together with the agents. Agents refuse new
+loads (running patches stay) when the revocation list is older than
+`revocation_max_age_days` (default 14), and nothing else renews the list. Run `rings.sh` once first if the last list
+is old, or set `revocation_max_age_days = 0` to switch the check off.
+
+### Security
+
+- A mirror that kept serving the last revocation list could hide a newer
+  one, and the agent still loaded a revoked level. Agents now treat a list
+  issued more than `revocation_max_age_days` (default 14, 0 disables) ago
+  like a missing one. `rings.sh` re-issues the list every
+  `REVOCATIONS_REISSUE_DAYS` (default 3) with the new
+  `hvpatch-tool reissue-revocations`. The wire format is unchanged.
+
 ### Added
 
 - Gate A checks that every patched function has an ftrace location in the

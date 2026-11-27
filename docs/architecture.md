@@ -112,7 +112,12 @@ itself.
   it back by atomic replace, or unloads it. An older list is ignored as a
   replay; a list with a bad signature stops the run. Once a list has been
   accepted, a repository that no longer serves it (or an older one) gets
-  nothing new loaded: a mirror could be hiding a newer revocation.
+  nothing new loaded: a mirror could be hiding a newer revocation. The same
+  holds when the list was issued more than `revocation_max_age_days`
+  (default 14, 0 disables) ago: a mirror that keeps serving the last list
+  cannot hide a newer one for longer. The publisher re-issues the list
+  (same entries, sequence + 1) every `REVOCATIONS_REISSUE_DAYS` (default 3)
+  in `rings.sh`, so a healthy repository always serves a recent list.
 - **Taint:** after loading, new taint flags fail the post-checks, except
   those the livepatch module itself carries (`/sys/module/<m>/taint`:
   `O`, `E`, `K`). On a host without ZFS, the module's own `O` is the first

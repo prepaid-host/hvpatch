@@ -386,10 +386,12 @@ impl<K: KernelOps> Agent<K> {
     }
 
     /// Fetch, verify and cache the revocation list. Returns the list to
-    /// apply and whether it came from the repository just now. Without one
-    /// in the repository (or when it is unreachable) the cached list
-    /// applies; a list older than one accepted before is a replay and is
-    /// ignored; a list with a bad signature stops the run.
+    /// apply and whether it is usable as current: fetched just now and not
+    /// too old. Without one in the repository (or when it is unreachable)
+    /// the cached list applies; a list older than one accepted before is a
+    /// replay and is ignored; a list with a bad signature stops the run. A
+    /// list issued longer ago than `revocation_max_age_days` is returned as
+    /// not fresh.
     fn refresh_revocations(&self, repo: &dyn Repo, state: &mut State) -> Result<(RevocationList, bool), ApplyError> {
         let cached = self.cached_revocations();
         let mut fetched = None;
@@ -433,6 +435,19 @@ impl<K: KernelOps> Agent<K> {
             write_atomic(&f.with_extension("json.minisig"), &sig)?;
             state.revocation_sequence = list.sequence;
             state.save(&self.cfg.state_file())?;
+        }
+        // A mirror can keep serving the last list while a newer one revokes
+        // more. The publisher re-issues the list often, so an old one is
+        // treated like a missing one. An `issued` in the future is clock skew.
+        let max_age = i64::from(self.cfg.revocation_max_age_days);
+        if max_age > 0 && (self.now)() - list.issued > chrono::Duration::days(max_age) {
+            self.log(format!(
+                "revocation list {} was issued {}, more than {max_age} days ago; the repository may be \
+                 withholding a newer one",
+                list.sequence,
+                list.issued.format("%Y-%m-%d")
+            ));
+            return Ok((list, false));
         }
         Ok((list, true))
     }
