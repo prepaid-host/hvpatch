@@ -49,10 +49,12 @@
 #                   hvpatch@mirror.mirror.svc:   (rrsync on the mirror)
 #   SSH_DIR         id_ed25519 + known_hosts for REPO_REMOTE (default /ssh)
 #   SSH_PORT        port of REPO_REMOTE (default 22)
-#   KEEP_TREES      kernel trees kept as build cache (default 3); older ones
-#                   are removed before a build
+#   KEEP_TREES      kernel trees kept as build cache (default: kernels
+#                   served, words in SERIES times NEWEST, at least 3); older
+#                   ones are removed before a build
 #   MODULE_KEY, MODULE_CERT, MANIFEST_KEY   as in sign-module.sh / publish.sh
-#   SERIES, NEWEST  passed to plan.sh
+#   SERIES, NEWEST  passed to plan.sh; the fetch stage reads them too (set
+#                   them for every stage; defaults 7.0 7.3 and 2)
 #   BUILDER_IMAGE   recorded in the source bundle
 #   TRUST           volume for the plan and checksums (default /trusted)
 #   MANIFEST_PUB    public manifest key for rings.sh (default the checkout's
@@ -262,8 +264,10 @@ case "$STAGE" in
     # Build cache (this stage has no keys; /work/build is written by earlier
     # builds): keep the newest KEEP_TREES kernel trees, always the planned one.
     mkdir -p "$W"; touch "$W"
+    SERVED=$(( $(wc -w <<< "${SERIES:-7.0 7.3}") * ${NEWEST:-2} ))
+    KEEP=${KEEP_TREES:-$(( SERVED < 3 ? 3 : SERVED ))}
     find "$WORK/build" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %p\n' | sort -rn | cut -d' ' -f2- \
-      | tail -n +"$(( ${KEEP_TREES:-3} + 1 ))" | while read -r d; do
+      | tail -n +"$(( KEEP + 1 ))" | while read -r d; do
       [ "$d" = "$W" ] && continue
       # An if, not &&: a false test as the last command would end the loop
       # (and with pipefail the stage) with a failure.
