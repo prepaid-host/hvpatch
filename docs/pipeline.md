@@ -50,6 +50,10 @@ also runs `builder/rings.sh`:
   are recorded in `state/rings` on the volume (only prepare and publish
   mount it). An older manifest put back on the server is neither renewed
   nor promoted, and an expired one never comes back.
+- after `rings.sh` has verified everything, `index.html` at the repository
+  root is rewritten with `hvpatch-tool status-page`: what each ring serves
+  per kernel, the CVEs fixed live, what needs a reboot, revoked levels
+  (`STATUS_PAGE=0` turns it off; `STATUS_TITLE`, `STATUS_PROJECT_URL`).
 
 Promotion goes by time only: the pipeline cannot tell whether canary nodes
 had problems. Watch the canary nodes (contrib/prometheus) and add a hold or
