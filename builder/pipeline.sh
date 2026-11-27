@@ -67,6 +67,9 @@
 #   STATUS_PAGE     1 (default): write index.html (hvpatch-tool status-page)
 #                   after every ring maintenance; STATUS_TITLE and
 #                   STATUS_PROJECT_URL set its title and project link
+#   APT_KEY         armored OpenPGP secret key of the APT archive: when set,
+#                   every ring maintenance also runs apt-repo.sh (the agent
+#                   package of the latest release under apt/)
 #   LOCK_DIR        directory for the run lock (default WORK/lock); not
 #                   mounted into the build container
 #   POD_NAME        owner of the run lock (default the host name)
@@ -205,6 +208,13 @@ ring_maintenance() {
   [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
   "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}" || return
   status_page
+  apt_repo
+}
+# The agent package as an APT repository under apt/ (apt-repo.sh), when the
+# archive key is mounted. A failure is logged, not fatal.
+apt_repo() {
+  [ -n "${APT_KEY:-}" ] && [ -f "$APT_KEY" ] || return 0
+  "$HERE/apt-repo.sh" "$PUB" "$APT_KEY" || log "apt repository not updated"
 }
 # The overview at the repository root (index.html), only after rings.sh has
 # verified every manifest and the revocation list. A failure is logged, not
