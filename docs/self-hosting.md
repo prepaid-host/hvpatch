@@ -29,8 +29,10 @@ the build with `MISMATCH: do not build`.
 
 ## 2. Keys (once)
 
-Keep the keys outside the repository; `run.sh` mounts the key directory
-read-only into the signing container only.
+Keep the keys outside the repository: `run.sh` refuses a `KEYS` directory
+inside it, because the build container mounts the repository. `KEYS` has no
+default. `run.sh` mounts the key directory read-only into the signing
+container only.
 
 ```bash
 mkdir -p ~/hvpatch-keys && cd ~/hvpatch-keys
