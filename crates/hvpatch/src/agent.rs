@@ -1179,8 +1179,8 @@ impl<K: KernelOps> Agent<K> {
         levels
     }
 
-    /// Keep a few levels of the running kernel and nothing of kernels the
-    /// state no longer knows.
+    /// Keep a few levels of the running kernel, plus its desired level, and
+    /// nothing of kernels the state no longer knows.
     fn prune_cache(&self, state: &State, release: &str) {
         let root = self.cfg.cache_dir();
         if let Ok(kernels) = std::fs::read_dir(&root) {
@@ -1191,8 +1191,12 @@ impl<K: KernelOps> Agent<K> {
                 }
             }
         }
+        // The desired level may be a restored one below the newest cached.
+        let desired = state.kernels.get(release).and_then(|k| k.desired_level);
         for level in self.cached_levels(release).into_iter().skip(CACHE_KEEP_LEVELS) {
-            let _ = std::fs::remove_dir_all(self.cache_dir(release, level));
+            if Some(level) != desired {
+                let _ = std::fs::remove_dir_all(self.cache_dir(release, level));
+            }
         }
     }
 

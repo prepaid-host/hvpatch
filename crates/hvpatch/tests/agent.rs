@@ -1050,3 +1050,21 @@ fn a_level_must_carry_the_states_of_the_active_one() {
     env.publish(m3, &ko3);
     assert!(matches!(a.apply(&explicit()).unwrap(), Outcome::Applied { level: 3, .. }));
 }
+
+#[test]
+fn prune_keeps_the_restored_desired_level() {
+    let env = Env::new();
+    env.publish_level(1);
+    let a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    std::fs::create_dir_all(&env.cfg.hooks_dir).unwrap();
+    write_script(&env.cfg.hooks_dir.join("10-check"), "#!/bin/sh\n[ \"$HVPATCH_LEVEL\" = 1 ] && exit 0\nexit 3\n");
+    for l in 2..=4 {
+        env.publish_level(l);
+        assert!(a.apply(&explicit()).is_err());
+    }
+    assert!(env.cfg.cache_dir().join(KVER).join("1").exists(), "desired level was pruned");
+    // After a reboot, boot must reload level 1.
+    let b = env.agent(kernel());
+    assert!(matches!(b.boot().unwrap(), Outcome::Applied { level: 1, .. }));
+}
