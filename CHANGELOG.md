@@ -6,6 +6,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-11-27
+
+Fixes from an outside review (thanks to @WMP), and the CVE watcher.
+
 **UPGRADE NOTE:** update the publishing pipeline (`rings.sh` re-issues
 `v1/revoked.json`) before or together with the agents. Agents refuse new
 loads (running patches stay) when the revocation list is older than
@@ -50,6 +54,26 @@ is old, or set `revocation_max_age_days = 0` to switch the check off.
   times `NEWEST`, at least 3; 4 by default) instead of 3, so served kernels
   do not evict each other's build trees. The build volume needs room for
   that many trees (about 55 GB each).
+
+### Fixed
+
+- Package upgrades started `hvpatch-boot.service` and so loaded kernel
+  code; the maintainer scripts no longer start, stop or restart it (#42).
+- After a restore, the active level (below the highest accepted one) was
+  treated as a rollback, or loaded a second time by `hvpatch boot` (#28).
+- `prune_cache` could delete the cache of the restored active level, so
+  nothing was reloaded after a reboot (#30).
+- The kprobe/BPF conflict check missed functions with a compiler suffix
+  such as `.isra.0` (#32).
+- A cluster lock left by a crashed node never expired: waiters now send
+  the pmxcfs unlock request, and the holder refreshes the lock from a
+  background thread during hooks and settle time (#36).
+- Gate A looked for the original objects in `klp-tmp/1-orig` only (#38).
+- `run.sh` defaulted to a key directory inside the repository, which the
+  build container mounts; `KEYS` is now required and must be outside (#40).
+- After a revocation the planner reused a published level number (#44).
+- `cve-scan.sh` wrote the full commit history and needed over 2 GB of
+  memory (#46); `pr-list.sh` read only the first 50 pull requests (#50).
 
 ## [0.4.0] - 2026-11-25
 
@@ -566,7 +590,8 @@ Use on test hosts only.
 - Release workflow with static binaries, SHA256SUMS and build provenance
   attestations.
 
-[Unreleased]: https://github.com/prepaid-host/hvpatch/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/prepaid-host/hvpatch/compare/v0.4.1...HEAD
+[0.4.1]: https://github.com/prepaid-host/hvpatch/compare/v0.4.0...v0.4.1
 [0.4.0]: https://github.com/prepaid-host/hvpatch/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/prepaid-host/hvpatch/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/prepaid-host/hvpatch/compare/v0.2.0...v0.2.1
