@@ -129,14 +129,17 @@ pub fn decide(m: &Manifest, node: &NodeFacts, ctx: &Context, mode: Mode) -> Deci
             return reject(LevelNotOffered { offered: m.level, requested: req });
         }
     }
+    // Before the rollback check: after a restore the active level is
+    // below the highest accepted one, and it is not a rollback.
+    if ctx.active_level == Some(m.level) {
+        return Decision::AlreadyActive;
+    }
     if mode != Mode::Restore {
         if m.level < ctx.highest_accepted {
             return reject(Rollback { offered: m.level, highest: ctx.highest_accepted });
         }
-        match ctx.active_level {
-            Some(a) if a == m.level => return Decision::AlreadyActive,
-            Some(a) if a > m.level => return reject(Downgrade { offered: m.level, active: a }),
-            _ => {}
+        if let Some(a) = ctx.active_level.filter(|a| *a > m.level) {
+            return reject(Downgrade { offered: m.level, active: a });
         }
     }
     if ctx.held && !ctx.explicit && mode != Mode::Restore {
@@ -272,6 +275,28 @@ mod tests {
         assert_eq!(decide(&manifest(), &node(), &ctx, Mode::Fetch), Decision::AlreadyActive);
         let ctx = Context { highest_accepted: 2, active_level: Some(2), ..Default::default() };
         assert!(ok(decide(&manifest(), &node(), &ctx, Mode::Fetch)));
+    }
+
+    #[test]
+    fn active_level_below_highest_is_already_active_not_rollback() {
+        let ctx = Context { highest_accepted: 4, active_level: Some(3), ..Default::default() };
+        assert_eq!(decide(&manifest(), &node(), &ctx, Mode::Fetch), Decision::AlreadyActive);
+        assert_eq!(decide(&manifest(), &node(), &ctx, Mode::Restore), Decision::AlreadyActive);
+        assert_eq!(decide(&manifest(), &node(), &ctx, Mode::BootFromCache), Decision::AlreadyActive);
+        let held = Context { held: true, ..ctx.clone() };
+        assert_eq!(decide(&manifest(), &node(), &held, Mode::Fetch), Decision::AlreadyActive);
+        // A requested level that is not offered still rejects first.
+        let req = Context { requested_level: Some(2), ..ctx.clone() };
+        assert!(matches!(
+            decide(&manifest(), &node(), &req, Mode::Fetch),
+            Decision::Reject(Rejection::LevelNotOffered { .. })
+        ));
+        // A lower level that is not the active one is still a rollback.
+        let ctx = Context { highest_accepted: 4, active_level: Some(4), ..Default::default() };
+        assert_eq!(
+            decide(&manifest(), &node(), &ctx, Mode::Fetch),
+            Decision::Reject(Rejection::Rollback { offered: 3, highest: 4 })
+        );
     }
 
     #[test]
