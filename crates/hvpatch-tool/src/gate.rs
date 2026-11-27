@@ -53,7 +53,7 @@ pub struct Inputs<'a> {
     /// the function list above exactly.
     pub resolved: Option<&'a Path>,
     /// `objtool klp diff` log (`path.o: changed function: name`) and the
-    /// directory of the original objects it names (klp-build's `1-orig`).
+    /// directory of the original objects it names (klp-build's `1-orig` in 7.3, `orig` in 6.19/7.0).
     pub diff_log: Option<&'a Path>,
     pub originals: Option<&'a Path>,
 }
