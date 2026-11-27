@@ -7,7 +7,9 @@
 # needs a build, or nothing. A kernel needs a build when it is one of the
 # NEWEST releases of a SERIES in the Proxmox repository (apt, signature
 # checked) and either has no published level yet, or the catalog changed
-# since the commit its published level was built from.
+# since the commit its published level was built from. The new level is one
+# above the highest published module file, even if the canary ring serves a
+# lower one (after a revocation).
 #
 # Environment:
 #   CATALOG   catalog directory inside a full git clone (default ./catalog)
@@ -62,6 +64,14 @@ print(level, module, commit)' "$m") || die "$m: unexpected manifest content"
   fi
   prev="$REPO/v1/$kver/$module"
   [ -f "$prev" ] || prev=-
+  # After a revocation the canary ring may serve a lower level than the
+  # highest published one: never plan a level number that already exists.
+  top=$level
+  base=${module%_p*}
+  for f in "$REPO/v1/$kver/${base}_p"*.ko; do
+    n=${f##*_p}; n=${n%.ko}
+    [[ $n =~ ^[0-9]{1,6}$ ]] && [ "$((10#$n))" -gt "$top" ] && top=$((10#$n))
+  done
   log "$kver: catalog changed since level $level ($built_from)"
-  echo "$kver $((level + 1)) $prev"; exit 0
+  echo "$kver $((top + 1)) $prev"; exit 0
 done
