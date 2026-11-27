@@ -1123,3 +1123,39 @@ fn prune_keeps_the_restored_desired_level() {
     let b = env.agent(kernel());
     assert!(matches!(b.boot().unwrap(), Outcome::Applied { level: 1, .. }));
 }
+
+#[test]
+fn boot_rerun_after_revocation_restore_keeps_the_active_level() {
+    let env = Env::new();
+    env.publish_level(1);
+    let a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    let m2 = env.publish_level(2);
+    a.apply(&explicit()).unwrap();
+    env.publish_revocations(&revocations(&[&m2], 1));
+    assert!(matches!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::Skipped(_)));
+    assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
+    let r = a.boot();
+    let st = env.state();
+    assert!(st.get(KVER).quarantined.is_empty(), "active level got quarantined");
+    assert_eq!(st.get(KVER).highest_accepted, 2);
+    assert_eq!(r.unwrap(), Outcome::AlreadyActive { level: 1 });
+    assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
+}
+
+#[test]
+fn ring_pointing_back_to_the_active_level_is_already_active() {
+    let env = Env::new();
+    env.publish_level(1);
+    let a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    let m2 = env.publish_level(2);
+    a.apply(&explicit()).unwrap();
+    env.publish_revocations(&revocations(&[&m2], 1));
+    assert!(matches!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::Skipped(_)));
+    assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
+    // The ring is pointed back to level 1, which is active.
+    env.publish_level(1);
+    assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
+    assert_eq!(env.state().get(KVER).highest_accepted, 2);
+}
