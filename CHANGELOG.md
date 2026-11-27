@@ -13,7 +13,8 @@ All notable changes to this project are documented here. The format follows
   link to the project, and the page links the keys and files nodes need.
 - APT repository for the agent (`builder/apt-repo.sh`): the pipeline
   publishes the package of the latest release under `apt/` on the mirror,
-  checked against `SHA256SUMS` and the GitHub build attestation, signed
+  checked against `SHA256SUMS` and its signed build provenance (cosign,
+  signer pinned to the release workflow at the release tag), signed
   with a separate archive key (`APT_KEY`). See `docs/apt-repository.md`.
 
 ## [0.4.1] - 2026-11-27

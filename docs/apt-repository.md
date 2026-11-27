@@ -16,9 +16,10 @@ apt update && apt install hvpatch
 Compare the key with `project-keys/apt-archive.asc` in this repository
 (`gpg --show-keys`). The pipeline keeps the repository with
 `builder/apt-repo.sh` on every run: when a new release is out, it downloads
-the package, checks it against the release's `SHA256SUMS`, requires a
-GitHub build attestation for the same bytes, and signs a new index with the
-archive key (`APT_KEY`). The key only exists in the publish container.
+the package, checks it against the release's `SHA256SUMS`, verifies the
+release's signed build provenance with cosign (signer: the release workflow
+at exactly that tag, subject: exactly these bytes), and signs a new index
+with the archive key (`APT_KEY`). The key only exists in the publish container.
 
 The rest of this page describes how to run such a repository yourself.
 

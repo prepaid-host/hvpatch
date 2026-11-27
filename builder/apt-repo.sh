@@ -5,8 +5,11 @@
 #
 # Looks up the latest GitHub release, and when its package is not in
 # <root>/apt yet: downloads it, checks it against the release's SHA256SUMS,
-# checks that GitHub holds a build attestation for exactly these bytes and
-# that the package is hvpatch at the release's version, adds it to the pool
+# verifies the release's signed build provenance (hvpatch.intoto.jsonl, a
+# Sigstore bundle) with cosign: signed by the release workflow
+# (.github/workflows/release.yml) at exactly this tag, for exactly these
+# bytes. Then checks that the package is hvpatch at the release's version,
+# adds it to the pool
 # and writes and signs the index (dists/trixie: InRelease, Release.gpg).
 # Older versions stay in the pool. Nothing changes when the release is
 # already there, so the index is only re-signed for a new package.
@@ -22,13 +25,13 @@
 #     > /etc/apt/sources.list.d/hvpatch.list
 #
 # Environment:
-#   GITHUB_REPO   owner/name (default prepaid-host/hvpatch)
-#   GITHUB_API    API base URL (default https://api.github.com)
+#   GITHUB_REPO   owner/name (default prepaid-host/hvpatch); the signer
+#                 identity is derived from it
 source "$(dirname "$0")/lib.sh"
 ROOT=${1:?repository root}; KEY=${2:?archive key}
-REPO=${GITHUB_REPO:-prepaid-host/hvpatch}; API=${GITHUB_API:-https://api.github.com}
+REPO=${GITHUB_REPO:-prepaid-host/hvpatch}
 [[ $REPO =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]] || die "bad GITHUB_REPO"
-require curl gpg dpkg-deb dpkg-scanpackages gzip sha256sum python3
+require curl gpg cosign dpkg-deb dpkg-scanpackages gzip sha256sum python3
 [ -f "$KEY" ] || die "archive key $KEY not found"
 APT=$ROOT/apt; DIST=$APT/dists/trixie; POOL=$APT/pool/main/h/hvpatch
 TMP=$(mktemp -d); trap 'rm -rf "$TMP"' EXIT
@@ -51,14 +54,24 @@ if [ ! -f "$POOL/$DEB" ]; then
   log "apt: adding $DEB ($TAG)"
   "${C[@]}" -o "$TMP/$DEB" "$DL/$DEB"
   echo "$SUM  $TMP/$DEB" | sha256sum -c --quiet - || die "$DEB does not match SHA256SUMS"
-  # SHA256SUMS comes from the same place as the package: also require a
-  # build attestation from this repository's release workflow for the bytes.
-  "${C[@]}" -H 'Accept: application/vnd.github+json' "$API/repos/$REPO/attestations/sha256:$SUM" -o "$TMP/att.json" \
-    || die "$DEB: no build attestation on GitHub"
+  # SHA256SUMS comes from the same place as the package. The provenance
+  # is signed with a short-lived certificate for the workflow run (Sigstore):
+  # require the release workflow at this tag as the signer.
+  "${C[@]}" -o "$TMP/bundles.jsonl" "$DL/hvpatch.intoto.jsonl"
   python3 -I -c '
-import json, sys
-a = json.load(open(sys.argv[1])).get("attestations") or []
-sys.exit(0 if a else 1)' "$TMP/att.json" || die "$DEB: no build attestation on GitHub"
+import base64, json, sys
+for line in open(sys.argv[1]):
+    b = json.loads(line)
+    p = json.loads(base64.b64decode(b["dsseEnvelope"]["payload"]))
+    if p.get("predicateType") == "https://slsa.dev/provenance/v1":
+        open(sys.argv[2], "w").write(line)
+        sys.exit(0)
+sys.exit(1)' "$TMP/bundles.jsonl" "$TMP/bundle.json" 2>/dev/null || die "$TAG: no build provenance in hvpatch.intoto.jsonl"
+  TUF_ROOT=$TMP/tuf cosign verify-blob-attestation --new-bundle-format --bundle "$TMP/bundle.json" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+    --certificate-identity "https://github.com/$REPO/.github/workflows/release.yml@refs/tags/$TAG" \
+    --type https://slsa.dev/provenance/v1 "$TMP/$DEB" >/dev/null 2>"$TMP/cosign.log" \
+    || { cat "$TMP/cosign.log" >&2; die "$DEB: build provenance does not verify"; }
   [ "$(dpkg-deb -f "$TMP/$DEB" Package)" = hvpatch ] || die "$DEB is not the hvpatch package"
   v=$(dpkg-deb -f "$TMP/$DEB" Version)
   [[ $v == "$VER"-* ]] || die "$DEB has version $v, not $VER"

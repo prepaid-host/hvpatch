@@ -31,12 +31,14 @@ RUN rm -f /etc/apt/sources.list.d/debian.sources \
 # the kernel build (7.3.x: rustc 1.94.1, LLVM 21). gawk is required by
 # klp-build; qemu, busybox-static and e2fsprogs (chattr, lsattr for the
 # reproducers) are for the QEMU stage (qemu-test.sh).
+# cosign verifies the signed build provenance of a release before
+# apt-repo.sh puts its package into the APT repository.
 RUN apt-get update \
  && apt-get install -y --no-install-recommends \
       build-essential gcc-14 binutils bc bison flex cpio kmod rsync gawk \
       libelf-dev libssl-dev libxxhash-dev libdw-dev dwarves zstd xz-utils lz4 bzip2 \
       git git-buildpackage quilt devscripts ca-certificates curl gnupg python3 \
-      qemu-system-x86 busybox-static e2fsprogs openssl openssh-client \
+      qemu-system-x86 busybox-static e2fsprogs openssl openssh-client cosign \
  && apt-get install -y --no-install-recommends -t trixie-backports \
       rustc rust-src rustfmt bindgen \
  && rm -rf /var/lib/apt/lists/*
