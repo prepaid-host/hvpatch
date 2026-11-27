@@ -29,6 +29,13 @@ All notable changes to this project are documented here. The format follows
   `HVPATCH_ALLOW_PENDING_REVIEW=1`) turns it into a note for test builds of
   draft branches.
 
+### Changed
+
+- `KEEP_TREES` defaults to the number of served kernels (words in `SERIES`
+  times `NEWEST`, at least 3; 4 by default) instead of 3, so served kernels
+  do not evict each other's build trees. The build volume needs room for
+  that many trees (about 55 GB each).
+
 ## [0.4.0] - 2026-11-25
 
 Ready-made livepatches: the project now builds, tests and signs modules for

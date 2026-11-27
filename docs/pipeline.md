@@ -153,8 +153,9 @@ which the build container does not mount.
 
 You need: the builder image (`ghcr.io/prepaid-host/hvpatch-builder`, built by
 `.github/workflows/builder-image.yml`, pin it by digest), a volume for the
-build cache (about 55 GB per kernel tree; `KEEP_TREES` limits it), the two
-keys and an SSH key for the repository host, which should accept it only
+build cache (about 55 GB per kernel tree; `KEEP_TREES` limits it, default
+the number of served kernels, at least 3: 4 with the default `SERIES` and
+`NEWEST`), the two keys and an SSH key for the repository host, which should accept it only
 for `rrsync` on the repository directory.
 
 The manifests of the project's own setup (Fleet, RKE2, Ceph) are in the
