@@ -1078,9 +1078,6 @@ impl<K: KernelOps> Agent<K> {
                     names.join(" ")
                 ));
             }
-            if let Some(l) = self.cluster.borrow_mut().as_mut() {
-                l.refresh();
-            }
             self.kernel.sleep(POLL);
             waited += POLL;
         }
