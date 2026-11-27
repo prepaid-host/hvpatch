@@ -25,6 +25,7 @@ override_dh_auto_clean:
 
 override_dh_installsystemd:
 	# The boot unit loads kernel code: never run it as a side effect of a
-	# package upgrade.
-	dh_installsystemd --no-restart-after-upgrade hvpatch-boot.service
+	# package upgrade or install: enabled, but maintainer scripts never start,
+	# stop or restart it.
+	dh_installsystemd --no-start --no-stop-on-upgrade hvpatch-boot.service
 	dh_installsystemd --no-enable --no-start hvpatch-auto.timer hvpatch-auto.service
