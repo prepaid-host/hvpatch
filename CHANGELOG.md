@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+
+- The pipeline writes the status page (`index.html` at the repository
+  root) after every ring maintenance. `status-page --project-url` adds a
+  link to the project, and the page links the keys and files nodes need.
+
 ## [0.4.1] - 2026-11-27
 
 Fixes from an outside review (thanks to @WMP), and the CVE watcher.

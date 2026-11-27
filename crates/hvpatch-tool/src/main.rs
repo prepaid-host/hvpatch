@@ -242,6 +242,9 @@ enum Cmd {
         repo: PathBuf,
         #[arg(long, default_value = "Kernel livepatches")]
         title: String,
+        /// Link to the project (setup and sources); https:// only.
+        #[arg(long)]
+        project_url: Option<String>,
         #[arg(long)]
         out: PathBuf,
     },
@@ -612,9 +615,9 @@ fn run(cli: Cli) -> Result<bool> {
             }
             Ok(true)
         }
-        Cmd::StatusPage { repo, title, out } => {
+        Cmd::StatusPage { repo, title, project_url, out } => {
             let r = statuspage::load(&repo)?;
-            write(&out, statuspage::render(&r, &title, Utc::now()).as_bytes())?;
+            write(&out, statuspage::render(&r, &title, project_url.as_deref(), Utc::now()).as_bytes())?;
             println!("{} kernel(s) -> {}", r.kernels.len(), out.display());
             Ok(true)
         }

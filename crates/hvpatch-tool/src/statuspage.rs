@@ -30,7 +30,12 @@ pub struct Repo {
     /// kernel -> ring -> manifest
     pub kernels: BTreeMap<String, BTreeMap<String, Manifest>>,
     pub revoked: Option<RevocationList>,
+    /// Files next to v1/ that nodes need (keys) or people look for.
+    pub files: Vec<&'static str>,
 }
+
+/// Linked from the page when they exist in the repository root.
+const ROOT_FILES: [&str; 4] = ["manifest.pub", "module-cert.der", "stats.json", "v1/"];
 
 pub fn load(root: &Path) -> Result<Repo> {
     let v1 = root.join("v1");
@@ -56,10 +61,12 @@ pub fn load(root: &Path) -> Result<Repo> {
         Ok(b) => Some(RevocationList::from_json(&b)?),
         Err(_) => None,
     };
-    Ok(Repo { kernels, revoked })
+    let files = ROOT_FILES.into_iter().filter(|f| root.join(f.trim_end_matches('/')).exists()).collect();
+    Ok(Repo { kernels, revoked, files })
 }
 
-pub fn render(repo: &Repo, title: &str, now: DateTime<Utc>) -> String {
+/// `project`: an optional `https://` link to the project (setup, sources).
+pub fn render(repo: &Repo, title: &str, project: Option<&str>, now: DateTime<Utc>) -> String {
     let mut h = String::new();
     let _ = write!(
         h,
@@ -80,6 +87,14 @@ pub fn render(repo: &Repo, title: &str, now: DateTime<Utc>) -> String {
         t = esc(title),
         now = now.format("%Y-%m-%d %H:%M UTC")
     );
+    let mut links: Vec<String> = Vec::new();
+    if let Some(p) = project.filter(|p| p.starts_with("https://")) {
+        links.push(format!("<a href=\"{0}\">{0}</a> (setup and sources)", esc(p)));
+    }
+    links.extend(repo.files.iter().map(|f| format!("<a href=\"{f}\"><code>{f}</code></a>")));
+    if !links.is_empty() {
+        let _ = write!(h, "<p>{}</p>", links.join(" · "));
+    }
 
     let mut kernels: Vec<_> = repo.kernels.iter().collect();
     kernels.sort_by(|a, b| cmp_version(b.0, a.0));
@@ -219,7 +234,19 @@ mod tests {
         );
         std::fs::write(t.path().join("v1/revoked.json"), l.to_json_pretty()).unwrap();
 
-        let html = render(&load(t.path()).unwrap(), "Livepatches <test>", "2026-11-24T12:00:00Z".parse().unwrap());
+        std::fs::write(t.path().join("manifest.pub"), "key").unwrap();
+        let r = load(t.path()).unwrap();
+        assert_eq!(r.files, vec!["manifest.pub", "v1/"]);
+        let html = render(
+            &r,
+            "Livepatches <test>",
+            Some("https://example.org/p?a=1&b=2"),
+            "2026-11-24T12:00:00Z".parse().unwrap(),
+        );
+        assert!(html.contains("href=\"https://example.org/p?a=1&amp;b=2\""));
+        assert!(html.contains("<a href=\"manifest.pub\">"));
+        assert!(!html.contains("module-cert.der"));
+        assert!(!render(&r, "t", Some("javascript:alert(1)"), Utc::now()).contains("javascript"));
         assert!(html.contains("Livepatches &lt;test&gt;"));
         assert!(html.contains("level 2 revoked"));
         assert!(html.contains("level 1<br>"));

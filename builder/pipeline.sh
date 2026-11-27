@@ -64,6 +64,9 @@
 #   RENEW_DAYS, VALID_DAYS, REVOCATIONS_REISSUE_DAYS   as in rings.sh
 #                   (RING_MAINTENANCE=0 also stops the revocation list
 #                   re-issue; agents then stop loading after 14 days)
+#   STATUS_PAGE     1 (default): write index.html (hvpatch-tool status-page)
+#                   after every ring maintenance; STATUS_TITLE and
+#                   STATUS_PROJECT_URL set its title and project link
 #   LOCK_DIR        directory for the run lock (default WORK/lock); not
 #                   mounted into the build container
 #   POD_NAME        owner of the run lock (default the host name)
@@ -200,7 +203,20 @@ keep_commits() {
 }
 ring_maintenance() {
   [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
-  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}"
+  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}" || return
+  status_page
+}
+# The overview at the repository root (index.html), only after rings.sh has
+# verified every manifest and the revocation list. A failure is logged, not
+# fatal: the page is a convenience, the manifests are what nodes use.
+status_page() {
+  [ "${STATUS_PAGE:-1}" = 1 ] || return 0
+  if hvpatch-tool status-page --repo "$PUB" --title "${STATUS_TITLE:-hvpatch project builds}" \
+      --project-url "${STATUS_PROJECT_URL:-https://github.com/prepaid-host/hvpatch}" --out "$PUB/index.html.tmp" >/dev/null; then
+    mv "$PUB/index.html.tmp" "$PUB/index.html"
+  else
+    rm -f "$PUB/index.html.tmp"; log "status page not written"
+  fi
 }
 if [ "$STAGE" = publish ]; then trap release_lock EXIT; else trap release_on_error EXIT; fi
 if [ "$STAGE" = publish ] && [ -n "$PR_NUM" ]; then
