@@ -119,7 +119,7 @@ enum Cmd {
         /// must have an ftrace location in its original object.
         #[arg(long, requires = "originals")]
         diff_log: Option<PathBuf>,
-        /// Original objects named in the diff log (klp-build's klp-tmp/1-orig).
+        /// Original objects named in the diff log (klp-build's klp-tmp/1-orig in 7.3, klp-tmp/orig in 6.19/7.0).
         #[arg(long, requires = "diff_log")]
         originals: Option<PathBuf>,
         #[arg(long)]
