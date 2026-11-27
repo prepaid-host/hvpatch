@@ -18,8 +18,9 @@
 #
 # Environment:
 #   ENGINE        podman (default) or docker
-#   KEYS          directory with module.priv and module-cert.der
-#                 (default: ./keys; keep it outside the repository if you can)
+#   KEYS          required: directory with module.priv and module-cert.der.
+#                 Must be outside the repository (the build container
+#                 mounts the repository)
 #   CATALOG       catalog directory inside the repository (default: catalog)
 #   MIN_FREE_GB   free space required in build/ (default 60, 15 with a cached tree)
 #   CYCLES        patch/unpatch cycles in the QEMU stage (default 5)
@@ -33,7 +34,7 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 ENGINE=${ENGINE:-podman}
 FROM_STAGE=${FROM_STAGE:-1}
 case "$FROM_STAGE" in 1|3) ;; *) echo "run.sh: FROM_STAGE must be 1 or 3" >&2; exit 1 ;; esac
-KEYS=${KEYS:-$ROOT/keys}
+KEYS=${KEYS:-}
 CATALOG=${CATALOG:-catalog}
 IMAGE=hvpatch-builder
 
@@ -41,7 +42,10 @@ die() { echo "run.sh: $*" >&2; exit 1; }
 command -v "$ENGINE" >/dev/null || die "$ENGINE not found (set ENGINE=docker?)"
 [ -x "$ROOT/builder/hvpatch-tool" ] || die "builder/hvpatch-tool missing: run 'make builder-image', or download
         hvpatch-tool-x86_64-linux-musl from the release page to builder/hvpatch-tool"
-KEYS=$(cd "$KEYS" 2>/dev/null && pwd) || die "key directory $KEYS not found (see docs/self-hosting.md)"
+[ -n "$KEYS" ] || die "KEYS is not set: point it at the key directory outside the repository (see docs/self-hosting.md)"
+KEYS=$(cd "$KEYS" 2>/dev/null && pwd -P) || die "key directory $KEYS not found (see docs/self-hosting.md)"
+# Physical paths: a symlink must not lead the check around the repository.
+case "$KEYS/" in "$(cd "$ROOT" && pwd -P)"/*) die "KEYS $KEYS is inside the repository, which the build container mounts: use a directory outside $ROOT (see docs/self-hosting.md)" ;; esac
 for f in module.priv module-cert.der; do
   [ -f "$KEYS/$f" ] || die "$KEYS/$f missing (see docs/self-hosting.md)"
 done
