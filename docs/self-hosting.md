@@ -209,8 +209,11 @@ MANIFEST_KEY=~/hvpatch-keys/manifest.secret \
 
 Nodes stop loading level 2 and, on their next timer run, put the highest
 cached level below it back (or unload it if there is none). Then publish a
-fixed level 3. The list's sequence number only goes up, so an attacker who
-can only replay old files cannot un-revoke anything.
+fixed level 3. With the unattended pipeline, commit the new
+`v1/revoked.json` as `rings/revoked.json` (pull request). Until then the
+pipeline keeps the revocation only if it has seen the list once. The
+list's sequence number only goes up, so an attacker who can only replay
+old files cannot un-revoke anything.
 
 ## 8. Rollout
 

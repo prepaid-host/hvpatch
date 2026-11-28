@@ -21,9 +21,18 @@
 #   - v1/revoked.json must verify too, and its sequence must not go back or
 #     the file vanish; otherwise nothing is promoted or renewed
 #
+# The set of revoked modules never shrinks here. The list this script
+# publishes is the union of the mirror's list, every entry of every verified
+# list it has seen before (STATE/revoked.known.json) and the optional
+# trusted copy (rings/revoked.json in the reviewed checkout, same format,
+# unsigned). So a mirror that serves an older signed list, or an operator
+# revoke that is lost in a race, cannot un-revoke a module: the missing
+# entries are published again. The mirror can only add revocations.
+#
 # Renewal also covers v1/revoked.json (if there is one): it is re-issued
-# (same entries, sequence + 1, new issued time) once it is
-# REVOCATIONS_REISSUE_DAYS (default 3) old. Agents refuse to load anything
+# (union of the entries, sequence + 1, new issued time) once it is
+# REVOCATIONS_REISSUE_DAYS (default 3) old, or at once if the mirror's list
+# lacks a revoked module known from elsewhere. Agents refuse to load anything
 # new when the list they have is older than revocation_max_age_days
 # (default 14). Runs with PROMOTE=0 too.
 #
@@ -32,14 +41,18 @@
 # stops all promotions. Revoked levels are not renewed either.
 #
 # usage: rings.sh <repo-root> <manifest-pubkey> <state-dir> [holds-file]
+#                 [trusted-revocations]
+#
+# A trusted-revocations file that does not exist counts as absent (unlike
+# the holds file).
 #
 # MANIFEST_KEY (hvpatch-tool key) or MINISIGN_KEY (minisign) signs.
 # PROMOTE=0 only renews. Exits 1 if anything looked wrong or could not be
 # changed (after doing everything else that is safe).
 source "$(dirname "$0")/lib.sh"
 HERE=$(cd "$(dirname "$0")" && pwd)
-REPO=${1:?usage: rings.sh <repo-root> <manifest-pubkey> <state-dir> [holds-file]}
-PUB=${2:?pubkey}; STATE=${3:?state dir}; HOLDS=${4:-}
+REPO=${1:?usage: rings.sh <repo-root> <manifest-pubkey> <state-dir> [holds-file] [trusted-revocations]}
+PUB=${2:?pubkey}; STATE=${3:?state dir}; HOLDS=${4:-}; TRUSTED=${5:-}
 require hvpatch-tool python3 date
 EARLY_DAYS=${PROMOTE_EARLY_DAYS:-3}; STABLE_DAYS=${PROMOTE_STABLE_DAYS:-7}
 RENEW_DAYS=${RENEW_DAYS:-10}; VALID_DAYS=${VALID_DAYS:-30}
@@ -48,6 +61,7 @@ for n in "$EARLY_DAYS" "$STABLE_DAYS" "$RENEW_DAYS" "$VALID_DAYS" "$REISSUE_DAYS
   [[ "$n" =~ ^[0-9]{1,3}$ ]] || die "day counts must be small integers"
 done
 [ -z "$HOLDS" ] || [ -f "$HOLDS" ] || die "holds file $HOLDS not found"
+[ -f "$TRUSTED" ] || TRUSTED=""
 mkdir -p "$STATE"
 NOW=$(date -u +%s)
 TMP=$(mktemp -d)
@@ -67,6 +81,25 @@ recorded() {
 }
 record() { echo "$3 $4" > "$STATE/$1.$2.tmp" && mv "$STATE/$1.$2.tmp" "$STATE/$1.$2"; }
 
+# merge_known <file>: add to the list in <file> everything in KNOWN (every
+# verified list seen so far) and the trusted copy, then store the union as
+# the new KNOWN before anything is published, so a failed push loses
+# nothing. Sets ADDED (entries the list lacked). KNOWN is local and
+# unsigned and never shrinks.
+KNOWN=$STATE/revoked.known.json
+merge_known() {
+  local srcs=()
+  [ ! -f "$KNOWN" ] || srcs+=(--from "$KNOWN")
+  [ -z "$TRUSTED" ] || srcs+=(--from "$TRUSTED")
+  ADDED=0
+  if [ ${#srcs[@]} -gt 0 ]; then
+    ADDED=$(hvpatch-tool merge-revocations --list "$1" "${srcs[@]}") \
+      || die "merging revocation lists failed; not promoting or renewing anything"
+    [[ "$ADDED" =~ ^[0-9]{1,9}$ ]] || die "merging revocation lists: bad count"
+  fi
+  cp "$1" "$KNOWN.tmp" && mv "$KNOWN.tmp" "$KNOWN" || die "cannot store $KNOWN"
+}
+
 # Revocations: verified, sequence never lower than recorded.
 SEQ_FILE=$STATE/revoked.sequence
 SEQ_SEEN=$(cat "$SEQ_FILE" 2>/dev/null || echo 0)
@@ -81,8 +114,10 @@ if [ -f "$LIST" ]; then
   # Agents refuse new loads when the list is older than their
   # revocation_max_age_days (default 14), so it is re-issued before that.
   ISSUED=$(date -u -d "$(field "$LIST" issued)" +%s) || die "v1/revoked.json: bad issued"
-  if [ $(( NOW - ISSUED )) -ge $(( REISSUE_DAYS * 86400 )) ]; then
-    cp "$LIST" "$TMP/revoked.json"
+  cp "$LIST" "$TMP/revoked.json"
+  merge_known "$TMP/revoked.json"
+  [ "$ADDED" -eq 0 ] || log "v1/revoked.json lacks $ADDED revoked module(s) known from earlier lists or the trusted copy; publishing them again"
+  if [ "$ADDED" -gt 0 ] || [ $(( NOW - ISSUED )) -ge $(( REISSUE_DAYS * 86400 )) ]; then
     if hvpatch-tool reissue-revocations --list "$TMP/revoked.json" >/dev/null \
       && publish_revocations "$TMP/revoked.json" "$LIST"; then
       # Not recorded in SEQ_FILE: only what the mirror serves counts, or a
@@ -94,16 +129,26 @@ if [ -f "$LIST" ]; then
   fi
 elif [ "$SEQ_SEEN" -gt 0 ]; then
   die "v1/revoked.json is gone (sequence $SEQ_SEEN was published); not promoting or renewing anything"
+elif [ -n "$TRUSTED" ]; then
+  # Nothing on the mirror yet: publish the reviewed list.
+  cp "$TRUSTED" "$TMP/revoked.json"
+  merge_known "$TMP/revoked.json"
+  if hvpatch-tool reissue-revocations --list "$TMP/revoked.json" >/dev/null \
+    && publish_revocations "$TMP/revoked.json" "$LIST"; then
+    log "published v1/revoked.json from the trusted copy (sequence $REVOCATIONS_SEQUENCE)"
+  else
+    log "publishing v1/revoked.json from the trusted copy failed"; BAD=1
+  fi
 fi
-# revoked <kver> <level> <sha256>
+# revoked <kver> <level> <sha256>: against the union, not the mirror's file
 revoked() {
-  [ -f "$LIST" ] || return 1
+  [ -f "$KNOWN" ] || return 1
   python3 -I -c '
 import json, sys
 d = json.load(open(sys.argv[1]))
 k, l, h = sys.argv[2], int(sys.argv[3]), sys.argv[4]
 sys.exit(0 if any(r.get("sha256") == h or (r.get("kernel") == k and r.get("level") == l) for r in d.get("revoked", [])) else 1)
-' "$LIST" "$1" "$2" "$3"
+' "$KNOWN" "$1" "$2" "$3"
 }
 
 held() {
