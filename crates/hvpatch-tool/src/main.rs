@@ -220,9 +220,11 @@ enum Cmd {
         /// FIRST EPSS scores (CSV: cve,epss,percentile).
         #[arg(long)]
         epss: Option<PathBuf>,
-        /// Commit messages of the kernel tree (`git log --format=%B`): fixes
-        /// whose mainline commit they name are already contained. Needed
-        /// for 7.0, whose Ubuntu base backports fixes.
+        /// Commit messages of the kernel tree, one NUL-separated block per
+        /// commit with the hash first (`git log --format='%x00%H%n%B'`; plain
+        /// `%B` breaks revert handling): fixes whose mainline commit they name
+        /// are already contained. Needed for 7.0, whose Ubuntu base backports
+        /// fixes.
         #[arg(long)]
         contained: Option<PathBuf>,
         /// Only P0, or P0 and P1.
@@ -604,15 +606,15 @@ fn run(cli: Cli) -> Result<bool> {
                             .unwrap_or_default()
                     );
                 }
-                let count = |p: &str| findings.iter().filter(|f| f.priority == p).count();
-                eprintln!(
-                    "{kernel} (upstream {upstream}): {} not in the catalog: P0 {}, P1 {}, P2 {}",
-                    findings.len(),
-                    count("P0"),
-                    count("P1"),
-                    count("P2")
-                );
             }
+            let count = |p: &str| findings.iter().filter(|f| f.priority == p).count();
+            eprintln!(
+                "{kernel} (upstream {upstream}): {} not in the catalog: P0 {}, P1 {}, P2 {}",
+                findings.len(),
+                count("P0"),
+                count("P1"),
+                count("P2")
+            );
             Ok(true)
         }
         Cmd::StatusPage { repo, title, project_url, out } => {
