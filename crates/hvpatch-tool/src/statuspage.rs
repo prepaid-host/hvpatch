@@ -103,12 +103,13 @@ pub fn render(repo: &Repo, title: &str, project: Option<&str>, now: DateTime<Utc
         let _ = write!(h, "<th>{r}</th>");
     }
     let _ = write!(h, "<th>Fixed live</th><th>Needs a reboot</th></tr>");
+    let is_revoked = |m: &Manifest| repo.revoked.as_ref().and_then(|l| l.find(&m.sha256)).is_some();
     for (k, rings) in &kernels {
         let _ = write!(h, "<tr><td><code>{}</code></td>", esc(k));
         for r in RINGS {
             match rings.get(*r) {
                 Some(m) => {
-                    let revoked = repo.revoked.as_ref().and_then(|l| l.find(&m.sha256)).is_some();
+                    let revoked = is_revoked(m);
                     let expired = now >= m.expires;
                     let (class, note) = if revoked {
                         ("bad", " revoked")
@@ -130,7 +131,12 @@ pub fn render(repo: &Repo, title: &str, project: Option<&str>, now: DateTime<Utc
             }
         }
         // The most advanced ring a node can be on: stable, else early, else canary.
-        let m = RINGS.iter().rev().find_map(|r| rings.get(*r)).expect("non-empty");
+        // Agents unload revoked levels, so those do not count.
+        let Some(m) = RINGS.iter().rev().filter_map(|r| rings.get(*r)).find(|m| !is_revoked(m)) else {
+            let _ =
+                write!(h, "<td>–<br><span class=\"muted\">(all published levels revoked)</span></td><td>–</td></tr>");
+            continue;
+        };
         let fixed: Vec<String> = m.fixes.iter().map(|f| cve(&f.id)).collect();
         let reboot: Vec<String> = m
             .not_covered
@@ -253,5 +259,58 @@ mod tests {
         assert!(html.contains("CVERecord?id=CVE-2026-1"));
         assert!(html.contains("struct &lt;change&gt;"));
         assert!(html.contains("fixed in 7.3.6-1-pve"));
+    }
+
+    #[test]
+    fn fixed_live_skips_revoked_levels() {
+        let m = |ring: &str, level, sha: &str, cve: &str| Manifest {
+            format: 1,
+            kernel: "7.3.5-1-pve".into(),
+            kernel_build_id: None,
+            level,
+            ring: ring.into(),
+            module: "m.ko".into(),
+            module_name: "m".into(),
+            sha256: sha.repeat(64),
+            built: "2026-11-23T09:00:00Z".parse().unwrap(),
+            expires: "2026-12-23T09:00:00Z".parse().unwrap(),
+            fixes: vec![Fix { id: cve.into(), title: None, functions: vec![] }],
+            not_covered: vec![],
+            superseded_by_kernel: None,
+            builder_image: None,
+            catalog_commit: None,
+            states: vec![],
+        };
+        let revoke = |l: &mut RevocationList, sha: &str, level| {
+            l.revoke(
+                klp_core::revocation::Revoked {
+                    sha256: sha.repeat(64),
+                    kernel: "7.3.5-1-pve".into(),
+                    level,
+                    reason: "regression".into(),
+                    revoked: Utc::now(),
+                },
+                Utc::now(),
+            )
+        };
+        let now = "2026-11-24T12:00:00Z".parse().unwrap();
+        let mut rings = BTreeMap::new();
+        rings.insert("canary".to_string(), m("canary", 1, "a", "CVE-B"));
+        rings.insert("stable".to_string(), m("stable", 2, "b", "CVE-A"));
+        let mut repo =
+            Repo { kernels: BTreeMap::from([("7.3.5-1-pve".to_string(), rings)]), revoked: None, files: vec![] };
+        let mut l = RevocationList::default();
+        revoke(&mut l, "b", 2);
+        repo.revoked = Some(l.clone());
+        let html = render(&repo, "t", None, now);
+        assert!(html.contains("CVERecord?id=CVE-B"));
+        assert!(!html.contains("CVERecord?id=CVE-A"));
+        assert!(!html.contains("all published levels revoked"));
+
+        revoke(&mut l, "a", 1);
+        repo.revoked = Some(l);
+        let html = render(&repo, "t", None, now);
+        assert!(!html.contains("CVERecord"));
+        assert!(html.contains("<span class=\"muted\">(all published levels revoked)</span>"));
     }
 }
