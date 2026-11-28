@@ -1026,13 +1026,13 @@ fn revocation_list_replay_and_bad_signature() {
     // An older, empty list (replay) does not un-revoke it, and nothing new
     // is loaded while the current list is withheld.
     env.publish_revocations(&revocations(&[], 4));
-    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("missing from the repository")));
     assert!(a.kernel.active().is_empty());
     assert!(a.log_lines().iter().any(|l| l.contains("older than 5")));
     // Same when the list disappears from the repository.
     std::fs::remove_file(env.repo.join("v1/revoked.json")).unwrap();
     env.publish_level(2);
-    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("missing from the repository")));
     assert!(a.kernel.active().is_empty());
     // A tampered list is rejected.
     env.publish_revocations(&revocations(&[&m1], 6));
@@ -1060,7 +1060,7 @@ fn old_revocation_list_blocks_new_loads() {
     // The mirror hides list 2, which revokes level 2: list 1 is 20 days old.
     let env = Env::new();
     let a = stale_list_agent(&env, 20);
-    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("missing from the repository")));
     assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
     assert!(a.log_lines().iter().any(|l| l.contains("withholding")));
 }
@@ -1158,4 +1158,40 @@ fn ring_pointing_back_to_the_active_level_is_already_active() {
     env.publish_level(1);
     assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
     assert_eq!(env.state().get(KVER).highest_accepted, 2);
+}
+
+/// Re-sign level 1 with the same module and a later `expires` (and `ring`), like builder/rings.sh.
+fn renew_level_1(env: &Env, ring: &str) -> Manifest {
+    let mut m = env.manifest(1);
+    m.ring = ring.into();
+    m.expires = "2027-01-23T09:00:00Z".parse().unwrap();
+    let ko = ko(&m.module_name, KVER, true);
+    env.publish(m, &ko)
+}
+
+#[test]
+fn renewed_manifest_refreshes_the_cache_of_the_active_level() {
+    let env = Env::new();
+    env.publish_level(1);
+    let a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    let renewed = renew_level_1(&env, "stable");
+    assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
+    assert_eq!(a.cached_manifest(KVER, 1).unwrap().0.expires, renewed.expires);
+}
+
+#[test]
+fn ring_change_keeps_boot_working_for_the_active_level() {
+    let mut env = Env::new();
+    env.publish_level(1);
+    let mut a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    // The node moves to the canary ring, which serves the same level.
+    env.cfg.ring = "canary".into();
+    a.cfg.ring = "canary".into();
+    renew_level_1(&env, "canary");
+    assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
+    // After a reboot: fresh kernel, fresh agent.
+    let b = env.agent(kernel());
+    assert!(matches!(b.boot().unwrap(), Outcome::Applied { level: 1, .. }));
 }
