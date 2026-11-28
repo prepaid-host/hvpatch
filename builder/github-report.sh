@@ -28,17 +28,24 @@ require curl python3
 # The build container could have replaced a directory on the way with a
 # symlink (to the mounted keys, say): OUT must be its own canonical path.
 # The stages run one after the other, so nothing changes it meanwhile.
-{ [ -d "$OUT" ] && [ "$(readlink -f -- "$OUT")" = "$OUT" ]; } || die "$OUT is not a plain directory path"
+# If it does not exist at all (the fetch failed), nothing is read through it
+# and the status is still posted.
+HAVE_OUT=1
+if [ ! -e "$OUT" ] && [ ! -L "$OUT" ]; then
+  log "$KVER: no output directory $OUT; reporting without snippets"; HAVE_OUT=0
+else
+  { [ -d "$OUT" ] && [ "$(readlink -f -- "$OUT")" = "$OUT" ]; } || die "$OUT is not a plain directory path"
+fi
 TMP=$(mktemp -d)
 trap 'rm -rf "$TMP"' EXIT
 # Regular files only (see lib.sh), at most the last 64 KiB.
-snippet() { if [ -f "$OUT/$1" ] && [ ! -L "$OUT/$1" ]; then tail -c 65536 "$OUT/$1"; fi; }
+snippet() { [ "$HAVE_OUT" = 1 ] || return 0; if [ -f "$OUT/$1" ] && [ ! -L "$OUT/$1" ]; then tail -c 65536 "$OUT/$1"; fi; }
 snippet gate-a.txt > "$TMP/gate-a"
 snippet functions.txt > "$TMP/functions"
 snippet qemu.ok > "$TMP/qemu"
 case $RESULT in
   failed:test) snippet qemu.log | tail -n 40 > "$TMP/log" ;;
-  failed:*) snippet build.log | grep -v -e 'disabling unsupported' | tail -n 40 > "$TMP/log" ;;
+  failed:*) snippet build.log | { grep -v -e 'disabling unsupported' || true; } | tail -n 40 > "$TMP/log" ;;
   *) : > "$TMP/log" ;;
 esac
 
