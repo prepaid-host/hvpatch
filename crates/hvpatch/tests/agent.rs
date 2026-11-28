@@ -1159,3 +1159,39 @@ fn ring_pointing_back_to_the_active_level_is_already_active() {
     assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
     assert_eq!(env.state().get(KVER).highest_accepted, 2);
 }
+
+/// Re-sign level 1 with the same module and a later `expires` (and `ring`), like builder/rings.sh.
+fn renew_level_1(env: &Env, ring: &str) -> Manifest {
+    let mut m = env.manifest(1);
+    m.ring = ring.into();
+    m.expires = "2027-01-23T09:00:00Z".parse().unwrap();
+    let ko = ko(&m.module_name, KVER, true);
+    env.publish(m, &ko)
+}
+
+#[test]
+fn renewed_manifest_refreshes_the_cache_of_the_active_level() {
+    let env = Env::new();
+    env.publish_level(1);
+    let a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    let renewed = renew_level_1(&env, "stable");
+    assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
+    assert_eq!(a.cached_manifest(KVER, 1).unwrap().0.expires, renewed.expires);
+}
+
+#[test]
+fn ring_change_keeps_boot_working_for_the_active_level() {
+    let mut env = Env::new();
+    env.publish_level(1);
+    let mut a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    // The node moves to the canary ring, which serves the same level.
+    env.cfg.ring = "canary".into();
+    a.cfg.ring = "canary".into();
+    renew_level_1(&env, "canary");
+    assert_eq!(a.apply(&ApplyOpts::default()).unwrap(), Outcome::AlreadyActive { level: 1 });
+    // After a reboot: fresh kernel, fresh agent.
+    let b = env.agent(kernel());
+    assert!(matches!(b.boot().unwrap(), Outcome::Applied { level: 1, .. }));
+}

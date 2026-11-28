@@ -291,6 +291,7 @@ impl<K: KernelOps> Agent<K> {
         let mut warnings = match self.decide(m, &state, active.as_ref().map(|a| a.1), Mode::Fetch, opts)? {
             Go::Apply(w) => w,
             Go::AlreadyActive => {
+                self.refresh_cached_manifest(&release, &v);
                 self.mark_active(&mut state, &release, m)?;
                 return Ok(Outcome::AlreadyActive { level: m.level });
             }
@@ -336,6 +337,24 @@ impl<K: KernelOps> Agent<K> {
             }
         }
         Err(last.expect("two attempts"))
+    }
+
+    /// A renewed (same module, later `expires`) or re-ringed manifest for the
+    /// active level replaces the cached copy that status and boot read.
+    /// Best effort: the level stays active if the write fails.
+    fn refresh_cached_manifest(&self, release: &str, v: &Verified) {
+        let dir = self.cache_dir(release, v.manifest.level);
+        let Ok(old) = std::fs::read(dir.join("manifest.json")) else { return };
+        if old == v.raw || Manifest::from_json(&old).map(|o| o.sha256).ok().as_deref() != Some(&v.manifest.sha256) {
+            return;
+        }
+        // shortcut: the two files are renamed separately, a crash between them leaves a mismatched pair that boot rejects; use a single-directory swap if that ever matters.
+        let res = write_atomic(&dir.join("manifest.json.minisig"), v.sig.as_bytes())
+            .and_then(|()| write_atomic(&dir.join("manifest.json"), &v.raw));
+        match res {
+            Ok(()) => self.log(format!("refreshed the cached manifest of level {}", v.manifest.level)),
+            Err(e) => self.log(format!("could not refresh the cached manifest of level {}: {e:#}", v.manifest.level)),
+        }
     }
 
     /// Everything after the manifest was accepted. Returns extra warnings.
