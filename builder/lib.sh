@@ -58,26 +58,29 @@ publish_ring() {
   local base="$repo/v1/$kver" stamp target
   stamp=$(date -u +%Y%m%dT%H%M%SZ)
   target="$ring.versions/$level-$stamp"
-  mkdir -p "$base/$target"
-  cp "$manifest" "$base/$target/manifest.json"
+  # Explicit returns: rings.sh runs this in an `if`, where set -e is off, and
+  # a ring must never point to a manifest without its signature.
+  mkdir -p "$base/$target" || return 1
+  cp "$manifest" "$base/$target/manifest.json" || return 1
   if [ -n "${MINISIGN_KEY:-}" ]; then
-    minisign -S -s "$MINISIGN_KEY" -m "$base/$target/manifest.json" -t "$comment"
+    minisign -S -s "$MINISIGN_KEY" -m "$base/$target/manifest.json" -t "$comment" || return 1
   else
     hvpatch-tool sign --key "${MANIFEST_KEY:?MANIFEST_KEY or MINISIGN_KEY not set}" \
-      --trusted-comment "$comment" "$base/$target/manifest.json"
+      --trusted-comment "$comment" "$base/$target/manifest.json" || return 1
   fi
   # Repositories from before 0.2.2 have <ring> as a plain directory.
   if [ -d "$base/$ring" ] && [ ! -L "$base/$ring" ]; then
-    mkdir -p "$base/$ring.versions"
-    mv "$base/$ring" "$base/$ring.versions/legacy-$stamp"
+    mkdir -p "$base/$ring.versions" || return 1
+    mv "$base/$ring" "$base/$ring.versions/legacy-$stamp" || return 1
   fi
-  ln -sfn "$target" "$base/$ring.new"
-  mv -T "$base/$ring.new" "$base/$ring"
+  ln -sfn "$target" "$base/$ring.new" || return 1
+  mv -T "$base/$ring.new" "$base/$ring" || return 1
   log "published $kver level $level to ring $ring ($target)"
 }
 
 # Sign a revocation list (<new-list>, already updated) and publish it as
-# <list>. Prints the sequence. Signing: MINISIGN_KEY or MANIFEST_KEY, as above.
+# <list>. Sets REVOCATIONS_SEQUENCE. Signing: MINISIGN_KEY or MANIFEST_KEY,
+# as above.
 publish_revocations() {
   local new="$1" list="$2" seq
   seq=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1]))["sequence"])' "$new") || return 1
@@ -94,8 +97,11 @@ publish_revocations() {
   # Both copies are staged before either is moved, so that a full disk
   # cannot leave a new signature next to the old list. Signature first,
   # then the list: agents fetch the list first and retry once on a mismatch.
-  cp "$new.minisig" "$list.minisig.tmp" && cp "$new" "$list.tmp" || return 1
-  mv "$list.minisig.tmp" "$list.minisig" && mv "$list.tmp" "$list" || return 1
+  # A failure leaves no stray files: in rings.sh the list is in the public repo.
+  if ! { cp "$new.minisig" "$list.minisig.tmp" && cp "$new" "$list.tmp" \
+    && mv "$list.minisig.tmp" "$list.minisig" && mv "$list.tmp" "$list"; }; then
+    rm -f "$list.minisig.tmp" "$list.tmp"; return 1
+  fi
   # shellcheck disable=SC2034 # read by the caller
   REVOCATIONS_SEQUENCE=$seq
 }
