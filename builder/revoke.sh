@@ -22,3 +22,4 @@ hvpatch-tool revoke --list "$TMP/revoked.json" --module "$KO" --kernel "$KVER" -
 publish_revocations "$TMP/revoked.json" "$LIST"
 SEQ=$REVOCATIONS_SEQUENCE
 log "revoked $KVER level $LEVEL (list sequence $SEQ)"
+log "with the unattended pipeline: commit $LIST as rings/revoked.json (pull request) so the pipeline keeps it"

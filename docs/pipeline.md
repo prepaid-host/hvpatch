@@ -40,10 +40,13 @@ also runs `builder/rings.sh`:
 - every ring manifest that expires within `RENEW_DAYS` (10) is re-signed
   with a new expiry `VALID_DAYS` (30) from now, same level and build time.
   Revoked levels are left to expire.
-- `v1/revoked.json` is re-issued (same entries, sequence + 1) every
+- `v1/revoked.json` is re-issued (sequence + 1) every
   `REVOCATIONS_REISSUE_DAYS` (3): agents load nothing new when their list
   is older than `revocation_max_age_days` (14). `RING_MAINTENANCE=0` stops
-  this too.
+  this too. The re-issued list is the union of the mirror's list, every
+  list the pipeline has seen before and the checkout's optional
+  `rings/revoked.json`, so a mirror cannot drop a revocation. After
+  `builder/revoke.sh`, commit its `v1/revoked.json` as `rings/revoked.json`.
 - the published repository is synced from the web server, so `rings.sh`
   trusts none of it: every manifest and `v1/revoked.json` must verify, and
   the time a level spent in a ring and the highest level each ring served

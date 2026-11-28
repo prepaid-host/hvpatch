@@ -60,6 +60,8 @@
 #   MANIFEST_PUB    public manifest key for rings.sh (default the checkout's
 #                   project-keys/manifest.pub)
 #   HOLDS           promotion holds (default the checkout's rings/holds)
+#   REVOCATIONS     trusted copy of the revocation list (default the
+#                   checkout's rings/revoked.json, optional)
 #   RING_MAINTENANCE, PROMOTE, PROMOTE_EARLY_DAYS, PROMOTE_STABLE_DAYS,
 #   RENEW_DAYS, VALID_DAYS, REVOCATIONS_REISSUE_DAYS   as in rings.sh
 #                   (RING_MAINTENANCE=0 also stops the revocation list
@@ -203,7 +205,7 @@ keep_commits() {
 }
 ring_maintenance() {
   [ "${RING_MAINTENANCE:-1}" = 1 ] || return 0
-  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}" || return
+  "$HERE/rings.sh" "$PUB" "${MANIFEST_PUB:-$SRC/project-keys/manifest.pub}" "$STATE/rings" "${HOLDS:-$SRC/rings/holds}" "${REVOCATIONS:-$SRC/rings/revoked.json}" || return
   status_page
 }
 # The overview at the repository root (index.html), only after rings.sh has
