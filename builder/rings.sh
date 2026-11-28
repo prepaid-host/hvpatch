@@ -109,7 +109,7 @@ sys.exit(0 if any(r.get("sha256") == h or (r.get("kernel") == k and r.get("level
 held() {
   [ -n "$HOLDS" ] || return 1
   local k l _
-  while read -r k l _; do
+  while read -r k l _ || [ -n "$k" ]; do
     case "$k" in '' | '#'*) continue ;; esac
     if { [ "$k" = '*' ] || [ "$k" = "$1" ]; } && { [ "$l" = '*' ] || [ "$l" = "$2" ]; }; then return 0; fi
   done < "$HOLDS"
