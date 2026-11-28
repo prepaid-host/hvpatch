@@ -11,23 +11,19 @@ use crate::config::Config;
 pub const CONFIG_TEMPLATE: &str = include_str!("../../../etc/hvpatch.toml");
 
 /// Set `key = value` in a TOML config text, keeping comments and layout.
-/// Replaces the first active or commented-out `key = …` line, or appends.
+/// Replaces the first active `key = …` line, else the first commented-out
+/// example, else appends.
 pub fn set_key(text: &str, key: &str, value: &str) -> String {
     let line = format!("{key} = {}", toml_string(value));
-    let mut out = Vec::new();
-    let mut done = false;
-    for l in text.lines() {
-        let t = l.trim_start().trim_start_matches('#').trim_start();
-        let is_key = t.strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('='));
-        if !done && is_key {
-            out.push(line.clone());
-            done = true;
-        } else {
-            out.push(l.to_owned());
-        }
-    }
-    if !done {
-        out.push(line);
+    let is_key = |t: &str| t.strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('='));
+    let lines: Vec<&str> = text.lines().collect();
+    let target = lines.iter().position(|l| is_key(l.trim_start())).or_else(|| {
+        lines.iter().position(|l| l.trim_start().starts_with('#') && is_key(l.trim_start_matches(['#', ' ', '\t'])))
+    });
+    let mut out: Vec<String> = lines.iter().map(|l| l.to_string()).collect();
+    match target {
+        Some(i) => out[i] = line,
+        None => out.push(line),
     }
     let mut s = out.join("\n");
     s.push('\n');
@@ -120,6 +116,19 @@ mod tests {
         assert_eq!(cfg.repository, "https://klp.example.org");
         // Idempotent.
         assert_eq!(set_key(&out, "ring", "canary"), out);
+    }
+
+    #[test]
+    fn set_key_prefers_the_active_line_over_a_commented_example() {
+        let text =
+            "# repository = \"https://klp.example.org\"\nring = \"stable\"\nrepository = \"https://old.example\"\n";
+        let out = set_key(text, "repository", "https://new.example");
+        assert_eq!(
+            out,
+            "# repository = \"https://klp.example.org\"\nring = \"stable\"\nrepository = \"https://new.example\"\n"
+        );
+        let cfg: Config = toml::from_str(&out).unwrap();
+        assert_eq!(cfg.repository, "https://new.example");
     }
 
     #[test]
