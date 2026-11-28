@@ -389,9 +389,11 @@ impl<K: KernelOps> Agent<K> {
     /// apply and whether it is usable as current: fetched just now and not
     /// too old. Without one in the repository (or when it is unreachable)
     /// the cached list applies; a list older than one accepted before is a
-    /// replay and is ignored; a list with a bad signature stops the run. A
+    /// replay and is ignored; so is a list with the sequence of the accepted
+    /// one but other content; a list with a bad signature stops the run. A
     /// list issued longer ago than `revocation_max_age_days` is returned as
-    /// not fresh.
+    /// not fresh. Every returned list also holds all entries seen in earlier
+    /// lists (`remember_revocations`): a later list never un-revokes.
     fn refresh_revocations(&self, repo: &dyn Repo, state: &mut State) -> Result<(RevocationList, bool), ApplyError> {
         let cached = self.cached_revocations();
         let mut fetched = None;
@@ -400,10 +402,10 @@ impl<K: KernelOps> Agent<K> {
         for attempt in 0..2 {
             let raw = match repo.get(REVOCATION_LIST, revocation::MAX_SIZE) {
                 Ok(b) => b,
-                Err(RepoError::NotFound(_)) => return Ok((cached, false)),
+                Err(RepoError::NotFound(_)) => return Ok((self.remember_revocations(state, cached)?, false)),
                 Err(RepoError::Other(e)) => {
                     self.log(format!("revocation list not available ({e:#}); using the cached one"));
-                    return Ok((cached, false));
+                    return Ok((self.remember_revocations(state, cached)?, false));
                 }
             };
             let sig = repo
@@ -427,7 +429,17 @@ impl<K: KernelOps> Agent<K> {
                 "ignoring revocation list {}: older than {} accepted before",
                 list.sequence, state.revocation_sequence
             ));
-            return Ok((cached, false));
+            return Ok((self.remember_revocations(state, cached)?, false));
+        }
+        if list.sequence == state.revocation_sequence
+            && cached.sequence == list.sequence
+            && std::fs::read(self.cfg.revocation_file()).is_ok_and(|c| c != raw)
+        {
+            self.log(format!(
+                "revocation list {} differs from the list accepted with the same sequence; keeping the accepted one",
+                list.sequence
+            ));
+            return Ok((self.remember_revocations(state, cached)?, false));
         }
         if list.sequence > state.revocation_sequence || cached.sequence != list.sequence {
             let f = self.cfg.revocation_file();
@@ -447,9 +459,31 @@ impl<K: KernelOps> Agent<K> {
                 list.sequence,
                 list.issued.format("%Y-%m-%d")
             ));
-            return Ok((list, false));
+            return Ok((self.remember_revocations(state, list)?, false));
         }
-        Ok((list, true))
+        Ok((self.remember_revocations(state, list)?, true))
+    }
+
+    /// Add the entries of a verified list to `state.revoked_seen` (saving
+    /// state when that changed) and return the list extended with every
+    /// entry seen before. Lists are append-only: one that lacks an entry
+    /// does not un-revoke it.
+    fn remember_revocations(&self, state: &mut State, mut list: RevocationList) -> Result<RevocationList, ApplyError> {
+        let before = state.revoked_seen.len();
+        for r in &list.revoked {
+            if !state.revoked_seen.iter().any(|s| s.sha256 == r.sha256) {
+                state.revoked_seen.push(r.clone());
+            }
+        }
+        if state.revoked_seen.len() != before {
+            state.save(&self.cfg.state_file())?;
+        }
+        for r in &state.revoked_seen {
+            if !list.revoked.iter().any(|l| l.sha256 == r.sha256) {
+                list.revoked.push(r.clone());
+            }
+        }
+        Ok(list)
     }
 
     fn verify_revocations(&self, raw: &[u8], sig: &[u8]) -> anyhow::Result<RevocationList> {
@@ -1256,7 +1290,7 @@ impl<K: KernelOps> Agent<K> {
             return Ok(Outcome::NothingToLoad);
         };
         let active = self.preflight(false)?;
-        let revoked = self.cached_revocations();
+        let revoked = self.remember_revocations(&mut state, self.cached_revocations())?;
         for level in self.cached_levels(&release).into_iter().filter(|l| *l <= desired) {
             let dir = self.cache_dir(&release, level);
             let Ok(v) = self.load_cached(&dir) else { continue };
