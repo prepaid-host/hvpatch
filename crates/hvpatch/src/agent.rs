@@ -229,8 +229,8 @@ impl<K: KernelOps> Agent<K> {
         // a newer revocation: keep what runs, load nothing new.
         if !fresh && state.revocation_sequence > 0 {
             return Err(ApplyError::Rejected(format!(
-                "the revocation list (sequence {} accepted before) is not available from the repository; \
-                 not loading anything new until it is",
+                "the revocation list (sequence {} accepted before) is missing from the repository or older than revocation_max_age_days; \
+                 not loading anything new until a current one is published",
                 state.revocation_sequence
             )));
         }

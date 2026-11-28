@@ -1026,13 +1026,13 @@ fn revocation_list_replay_and_bad_signature() {
     // An older, empty list (replay) does not un-revoke it, and nothing new
     // is loaded while the current list is withheld.
     env.publish_revocations(&revocations(&[], 4));
-    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("missing from the repository")));
     assert!(a.kernel.active().is_empty());
     assert!(a.log_lines().iter().any(|l| l.contains("older than 5")));
     // Same when the list disappears from the repository.
     std::fs::remove_file(env.repo.join("v1/revoked.json")).unwrap();
     env.publish_level(2);
-    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("missing from the repository")));
     assert!(a.kernel.active().is_empty());
     // A tampered list is rejected.
     env.publish_revocations(&revocations(&[&m1], 6));
@@ -1060,7 +1060,7 @@ fn old_revocation_list_blocks_new_loads() {
     // The mirror hides list 2, which revokes level 2: list 1 is 20 days old.
     let env = Env::new();
     let a = stale_list_agent(&env, 20);
-    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("not available")));
+    assert!(matches!(a.apply(&explicit()), Err(ApplyError::Rejected(e)) if e.contains("missing from the repository")));
     assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
     assert!(a.log_lines().iter().any(|l| l.contains("withholding")));
 }
