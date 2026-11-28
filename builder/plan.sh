@@ -30,6 +30,30 @@ mkdir -p "$STATE"
 apt-get update -qq >/dev/null 2>&1 || die "apt-get update failed (Proxmox repository)"
 COMMIT=$(git -C "$CATALOG" rev-parse HEAD)
 
+# manifest_fields <file>: print "<level> <module> <catalog_commit>". The
+# published copy comes from the mirror: treat every field as untrusted and
+# pass on only values of a strict form (they reach shell arithmetic and file
+# paths).
+manifest_fields() {
+  python3 -I -c '
+import json, re, sys
+m = json.load(open(sys.argv[1]))
+level, module, commit = m["level"], m["module"], m.get("catalog_commit") or "unknown"
+if type(level) is not int or not 0 < level < 1000000:
+    sys.exit("bad level")
+if not isinstance(module, str) or not re.fullmatch(r"klp_[A-Za-z0-9_]{1,100}\.ko", module):
+    sys.exit("bad module name")
+if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}(-dirty)?|unknown", commit):
+    sys.exit("bad catalog_commit")
+print(level, module, commit)' "$1"
+}
+
+# catalog_unchanged <commit>: the catalog is the same as at <commit>.
+catalog_unchanged() {
+  [ "$1" != unknown ] && git -C "$CATALOG" cat-file -e "${1%-dirty}^{commit}" 2>/dev/null \
+    && git -C "$CATALOG" diff --quiet "${1%-dirty}" "$COMMIT" -- .
+}
+
 # Collect first: leaving a `cmd | while` loop early would SIGPIPE the
 # producer, and pipefail turns that into a failure.
 KERNELS=()
@@ -42,26 +66,10 @@ for kver in ${KERNELS[@]+"${KERNELS[@]}"}; do
     log "$kver: nothing published yet"
     echo "$kver 1 -"; exit 0
   fi
-  # The published copy comes from the mirror: treat every field as untrusted
-  # and pass on only values of a strict form (they reach shell arithmetic
-  # and file paths).
-  fields=$(python3 -I -c '
-import json, re, sys
-m = json.load(open(sys.argv[1]))
-level, module, commit = m["level"], m["module"], m.get("catalog_commit") or "unknown"
-if type(level) is not int or not 0 < level < 1000000:
-    sys.exit("bad level")
-if not isinstance(module, str) or not re.fullmatch(r"klp_[A-Za-z0-9_]{1,100}\.ko", module):
-    sys.exit("bad module name")
-if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}(-dirty)?|unknown", commit):
-    sys.exit("bad catalog_commit")
-print(level, module, commit)' "$m") || die "$m: unexpected manifest content"
+  fields=$(manifest_fields "$m") || die "$m: unexpected manifest content"
   read -r level module built_from <<< "$fields"
   [[ $level =~ ^[0-9]{1,6}$ ]] || die "$m: bad level"
-  if [ "$built_from" != unknown ] && git -C "$CATALOG" cat-file -e "${built_from%-dirty}^{commit}" 2>/dev/null \
-     && git -C "$CATALOG" diff --quiet "${built_from%-dirty}" "$COMMIT" -- .; then
-    continue
-  fi
+  catalog_unchanged "$built_from" && continue
   prev="$REPO/v1/$kver/$module"
   [ -f "$prev" ] || prev=-
   # After a revocation the canary ring may serve a lower level than the
@@ -72,6 +80,21 @@ print(level, module, commit)' "$m") || die "$m: unexpected manifest content"
     n=${f##*_p}; n=${n%.ko}
     [[ $n =~ ^[0-9]{1,6}$ ]] && [ "$((10#$n))" -gt "$top" ] && top=$((10#$n))
   done
+  if [ "$top" -gt "$level" ]; then
+    # Canary was moved back (revocation): the catalog may be unchanged since
+    # the level above it, whose code is the revoked one. Do not rebuild it
+    # under a new number, no revocation entry would match it.
+    for tm in "$REPO/v1/$kver/"*.versions/"$top"-*/manifest.json; do
+      if fields=$(manifest_fields "$tm" 2>/dev/null); then
+        read -r tl _ tc <<< "$fields"
+        if [ "$tl" = "$top" ] && catalog_unchanged "$tc"; then
+          log "$kver: catalog unchanged since level $top ($tc), which canary no longer serves; not rebuilding"
+          continue 2
+        fi
+      fi
+      break
+    done
+  fi
   log "$kver: catalog changed since level $level ($built_from)"
   echo "$kver $((top + 1)) $prev"; exit 0
 done
