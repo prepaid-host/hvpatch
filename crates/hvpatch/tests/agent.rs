@@ -1022,6 +1022,25 @@ fn revocation_dropped_by_a_later_list_stays_revoked() {
 }
 
 #[test]
+fn same_sequence_list_with_a_new_revocation_still_revokes() {
+    let env = Env::new();
+    env.publish_level(1);
+    let a = env.agent(kernel());
+    a.apply(&explicit()).unwrap();
+    let m2 = env.publish_level(2);
+    a.apply(&explicit()).unwrap();
+    env.publish_revocations(&revocations(&[], 2));
+    a.apply(&ApplyOpts::default()).unwrap();
+    assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p2"]);
+
+    // Same sequence, other content: not trusted as current, but it only revokes more.
+    env.publish_revocations(&revocations(&[&m2], 2));
+    assert!(a.apply(&ApplyOpts::default()).is_err());
+    assert_eq!(env.state().revoked_seen[0].sha256, m2.sha256);
+    assert_eq!(a.kernel.active(), vec!["klp_hvp_7_3_5_1_p1"]);
+}
+
+#[test]
 fn same_sequence_different_list_is_not_trusted() {
     let env = Env::new();
     env.publish_level(1);

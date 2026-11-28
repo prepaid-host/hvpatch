@@ -429,6 +429,8 @@ impl<K: KernelOps> Agent<K> {
                 "ignoring revocation list {}: older than {} accepted before",
                 list.sequence, state.revocation_sequence
             ));
+            // Signed with the manifest key: its entries can only revoke more.
+            self.remember_revocations(state, list)?;
             return Ok((self.remember_revocations(state, cached)?, false));
         }
         if list.sequence == state.revocation_sequence
@@ -439,6 +441,7 @@ impl<K: KernelOps> Agent<K> {
                 "revocation list {} differs from the list accepted with the same sequence; keeping the accepted one",
                 list.sequence
             ));
+            self.remember_revocations(state, list)?;
             return Ok((self.remember_revocations(state, cached)?, false));
         }
         if list.sequence > state.revocation_sequence || cached.sequence != list.sequence {
@@ -468,7 +471,7 @@ impl<K: KernelOps> Agent<K> {
     /// state when that changed) and return the list extended with every
     /// entry seen before. Lists are append-only: one that lacks an entry
     /// does not un-revoke it.
-    fn remember_revocations(&self, state: &mut State, mut list: RevocationList) -> Result<RevocationList, ApplyError> {
+    fn remember_revocations(&self, state: &mut State, list: RevocationList) -> Result<RevocationList, ApplyError> {
         let before = state.revoked_seen.len();
         for r in &list.revoked {
             if !state.revoked_seen.iter().any(|s| s.sha256 == r.sha256) {
@@ -478,12 +481,7 @@ impl<K: KernelOps> Agent<K> {
         if state.revoked_seen.len() != before {
             state.save(&self.cfg.state_file())?;
         }
-        for r in &state.revoked_seen {
-            if !list.revoked.iter().any(|l| l.sha256 == r.sha256) {
-                list.revoked.push(r.clone());
-            }
-        }
-        Ok(list)
+        Ok(with_seen(list, state))
     }
 
     fn verify_revocations(&self, raw: &[u8], sig: &[u8]) -> anyhow::Result<RevocationList> {
@@ -1371,6 +1369,16 @@ impl<K: KernelOps> Agent<K> {
         let v = self.load_cached(&self.cache_dir(release, level)).ok()?;
         Some((v.manifest, v.signer))
     }
+}
+
+/// The list extended in memory with the `revoked_seen` entries it lacks.
+pub fn with_seen(mut list: RevocationList, state: &State) -> RevocationList {
+    for r in &state.revoked_seen {
+        if !list.revoked.iter().any(|l| l.sha256 == r.sha256) {
+            list.revoked.push(r.clone());
+        }
+    }
+    list
 }
 
 /// The revocation entry for this manifest: by module hash, or by kernel and
