@@ -128,7 +128,8 @@ pub fn collect<K: KernelOps>(agent: &Agent<K>) -> Result<StatusReport> {
     let mut hints = leftover_hints(agent, &patches);
     if let (Some(a), Some((m, _))) = (&active, &cached) {
         if a.level == Some(m.level) {
-            if let Some(r) = crate::agent::revoked_entry(&agent.cached_revocations(), &kernel, m) {
+            let revoked = crate::agent::with_seen(agent.cached_revocations(), &state);
+            if let Some(r) = crate::agent::revoked_entry(&revoked, &kernel, m) {
                 hints.push(format!(
                     "the active level {} is revoked ({}); the next `hvpatch apply` takes it out of service",
                     m.level, r.reason

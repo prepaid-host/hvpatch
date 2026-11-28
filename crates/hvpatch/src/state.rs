@@ -86,6 +86,10 @@ pub struct State {
     pub kernels: BTreeMap<String, KernelState>,
     /// Highest revocation list sequence accepted; older lists are replays.
     pub revocation_sequence: u64,
+    /// Every entry of every revocation list this node accepted; lists are
+    /// append-only, so a later list that lacks one does not un-revoke it.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub revoked_seen: Vec<klp_core::revocation::Revoked>,
 }
 
 /// Keep state for this many kernels; older entries are dropped.
@@ -156,6 +160,13 @@ pub fn write_atomic(path: &Path, data: &[u8]) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn old_state_without_revoked_seen_loads() {
+        let s: State = serde_json::from_str(r#"{"kernels":{},"revocation_sequence":3}"#).unwrap();
+        assert_eq!(s.revocation_sequence, 3);
+        assert!(s.revoked_seen.is_empty());
+    }
 
     #[test]
     fn roundtrip_and_prune() {
