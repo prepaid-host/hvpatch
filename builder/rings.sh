@@ -87,6 +87,10 @@ record() { echo "$3 $4" > "$STATE/$1.$2.tmp" && mv "$STATE/$1.$2.tmp" "$STATE/$1
 # nothing. Sets ADDED (entries the list lacked). KNOWN is local and
 # unsigned and never shrinks.
 KNOWN=$STATE/revoked.known.json
+# Also called with each list after it was published, so that KNOWN holds the
+# highest sequence ever published: a mirror that goes back then gets a list
+# above it, not a second, different list with the same sequence.
+store_known() { cp "$1" "$KNOWN.tmp" && mv "$KNOWN.tmp" "$KNOWN" || die "cannot store $KNOWN"; }
 merge_known() {
   local srcs=()
   [ ! -f "$KNOWN" ] || srcs+=(--from "$KNOWN")
@@ -97,7 +101,7 @@ merge_known() {
       || die "merging revocation lists failed; not promoting or renewing anything"
     [[ "$ADDED" =~ ^[0-9]{1,9}$ ]] || die "merging revocation lists: bad count"
   fi
-  cp "$1" "$KNOWN.tmp" && mv "$KNOWN.tmp" "$KNOWN" || die "cannot store $KNOWN"
+  store_known "$1"
 }
 
 # Revocations: verified, sequence never lower than recorded.
@@ -119,7 +123,8 @@ if [ -f "$LIST" ]; then
   [ "$ADDED" -eq 0 ] || log "v1/revoked.json lacks $ADDED revoked module(s) known from earlier lists or the trusted copy; publishing them again"
   if [ "$ADDED" -gt 0 ] || [ $(( NOW - ISSUED )) -ge $(( REISSUE_DAYS * 86400 )) ]; then
     if hvpatch-tool reissue-revocations --list "$TMP/revoked.json" >/dev/null \
-      && publish_revocations "$TMP/revoked.json" "$LIST"; then
+      && publish_revocations "$TMP/revoked.json" "$LIST" \
+      && store_known "$TMP/revoked.json"; then
       # Not recorded in SEQ_FILE: only what the mirror serves counts, or a
       # failed push leaves later runs dying on "went back".
       log "re-issued v1/revoked.json (sequence $REVOCATIONS_SEQUENCE)"
@@ -134,7 +139,8 @@ elif [ -n "$TRUSTED" ]; then
   cp "$TRUSTED" "$TMP/revoked.json"
   merge_known "$TMP/revoked.json"
   if hvpatch-tool reissue-revocations --list "$TMP/revoked.json" >/dev/null \
-    && publish_revocations "$TMP/revoked.json" "$LIST"; then
+    && publish_revocations "$TMP/revoked.json" "$LIST" \
+    && store_known "$TMP/revoked.json"; then
     log "published v1/revoked.json from the trusted copy (sequence $REVOCATIONS_SEQUENCE)"
   else
     log "publishing v1/revoked.json from the trusted copy failed"; BAD=1

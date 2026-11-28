@@ -49,6 +49,12 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - run: rustup toolchain install stable --profile minimal && rustup default stable
       - run: cargo run --locked -q -p hvpatch-tool -- lint --catalog catalog
+      - name: rings/revoked.json (trusted by rings.sh) is a valid list
+        run: |
+          [ ! -f rings/revoked.json ] || {
+            tmp=$(mktemp) && cp rings/revoked.json "$tmp" &&
+              cargo run --locked -q -p hvpatch-tool -- merge-revocations --list "$tmp" --from rings/revoked.json
+          }
       - name: fetch the upstream commits named in the catalog
         run: |
           # From git.kernel.org only, which serves nothing but commits
