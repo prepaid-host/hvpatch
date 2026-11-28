@@ -272,6 +272,20 @@ enum Cmd {
         #[arg(long)]
         list: PathBuf,
     },
+    /// Add to `--list` every revoked module of the `--from` lists that it
+    /// lacks (sequence becomes the highest of all) and print how many were
+    /// added. For rings.sh: the list it publishes must never drop a module
+    /// revoked earlier, whatever the mirror served. Entries are never
+    /// removed. Re-issue and sign afterwards.
+    MergeRevocations {
+        /// revoked.json to update in place; it must exist.
+        #[arg(long)]
+        list: PathBuf,
+        /// Lists to take entries from (unsigned is fine; they must parse
+        /// and validate). Repeatable.
+        #[arg(long = "from", required = true, num_args = 1..)]
+        from: Vec<PathBuf>,
+    },
 }
 
 fn main() -> ExitCode {
@@ -647,6 +661,19 @@ fn run(cli: Cli) -> Result<bool> {
             l.validate()?;
             write(&list, l.to_json_pretty().as_bytes())?;
             println!("{}", l.sequence);
+            Ok(true)
+        }
+        Cmd::MergeRevocations { list, from } => {
+            let load =
+                |p: &Path| RevocationList::from_json(&read(p)?).with_context(|| format!("reading {}", p.display()));
+            let mut l = load(&list)?;
+            let mut added = 0;
+            for f in &from {
+                added += l.merge(&load(f)?);
+            }
+            l.validate()?;
+            write(&list, l.to_json_pretty().as_bytes())?;
+            println!("{added}");
             Ok(true)
         }
     }

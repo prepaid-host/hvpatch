@@ -81,6 +81,19 @@ impl RevocationList {
         self.issued = now;
     }
 
+    /// Add every entry of `other` that is not in `self` (by sha256; an
+    /// entry already here is kept) and take the higher sequence. Entries
+    /// are never removed, so merging cannot un-revoke anything. Returns the
+    /// number added. `issued` is left alone: the caller re-issues.
+    pub fn merge(&mut self, other: &RevocationList) -> usize {
+        let missing: Vec<Revoked> = other.revoked.iter().filter(|r| self.find(&r.sha256).is_none()).cloned().collect();
+        let added = missing.len();
+        self.revoked.extend(missing);
+        self.revoked.sort_by(|a, b| (&a.kernel, a.level).cmp(&(&b.kernel, b.level)));
+        self.sequence = self.sequence.max(other.sequence);
+        added
+    }
+
     /// Publish the same entries again with a new sequence and issue time,
     /// so that agents can tell the list is current (they refuse new loads
     /// when `issued` is too old).
@@ -145,5 +158,33 @@ mod tests {
         assert!(
             RevocationList::from_json(br#"{"format":1,"sequence":1,"issued":"2026-11-24T00:00:00Z","x":1}"#).is_err()
         );
+    }
+
+    #[test]
+    fn merge_adds_missing_and_never_removes() {
+        let t1 = "2026-01-01T00:00:00Z".parse().unwrap();
+        let mut a = RevocationList::default();
+        a.revoke(entry('a', 1), t1);
+        let mut b = RevocationList::default();
+        b.revoke(entry('b', 2), t1);
+        b.revoke(entry('c', 1), t1);
+        let mut dup = entry('a', 1);
+        dup.reason = "other reason".into();
+        b.revoke(dup, t1);
+        assert_eq!(b.sequence, 3);
+        let kept = a.find(&"a".repeat(64)).unwrap().clone();
+        assert_eq!(a.merge(&b), 2);
+        assert_eq!(a.revoked.len(), 3);
+        assert_eq!(a.find(&"a".repeat(64)), Some(&kept), "existing entry kept");
+        assert_eq!(a.sequence, 3, "max sequence");
+        assert_eq!(a.issued, t1, "issued unchanged");
+        assert!(a.revoked.windows(2).all(|w| (&w[0].kernel, w[0].level) <= (&w[1].kernel, w[1].level)));
+        assert_eq!(a.merge(&b), 0, "idempotent");
+        assert_eq!(a.revoked.len(), 3);
+        // a lower sequence does not lower ours
+        let mut low = RevocationList::default();
+        low.revoke(entry('d', 5), t1);
+        assert_eq!(a.merge(&low), 1);
+        assert_eq!(a.sequence, 3);
     }
 }
