@@ -85,7 +85,8 @@ if [ -f "$LIST" ]; then
     cp "$LIST" "$TMP/revoked.json"
     if hvpatch-tool reissue-revocations --list "$TMP/revoked.json" >/dev/null \
       && publish_revocations "$TMP/revoked.json" "$LIST"; then
-      echo "$REVOCATIONS_SEQUENCE" > "$SEQ_FILE"
+      # Not recorded in SEQ_FILE: only what the mirror serves counts, or a
+      # failed push leaves later runs dying on "went back".
       log "re-issued v1/revoked.json (sequence $REVOCATIONS_SEQUENCE)"
     else
       log "re-issuing v1/revoked.json failed; agents stop loading when it gets too old"; BAD=1
